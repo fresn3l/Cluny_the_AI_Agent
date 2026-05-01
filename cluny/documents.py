@@ -46,7 +46,7 @@ def add_file(
     chash = _content_hash(text)
 
     if copy_into_library:
-        dest_dir = settings.data_dir / "library" / "files"
+        dest_dir = settings.catalog_root / "files"
         dest_dir.mkdir(parents=True, exist_ok=True)
         suffix = src.suffix.lower() or ""
         work_path = dest_dir / f"{chash}{suffix}"

@@ -84,8 +84,8 @@ Shows chunk count (vectors) and document count (SQLite).
 
 | Piece | Location (default) |
 |--------|---------------------|
-| SQLite catalog | `.cluny/library/library.sqlite` (override filename with `CLUNY_LIBRARY_SQLITE` in `.env`) |
-| Managed file copies (`--copy`) | `.cluny/library/files/<sha256>.pdf` |
+| SQLite catalog | `.cluny/library/library.sqlite` by default; folder name via `CLUNY_CATALOG_DIR` (e.g. `BRAIN` → `.cluny/BRAIN/…`); filename via `CLUNY_LIBRARY_SQLITE` |
+| Managed file copies (`--copy`) | `<CLUNY_DATA_DIR>/<CLUNY_CATALOG_DIR>/files/<sha256>.pdf` |
 | Vector index (Chroma) | `.cluny/chroma/` |
 
 Set `CLUNY_DATA_DIR` in `.env` to move the whole tree (e.g. an external drive).
