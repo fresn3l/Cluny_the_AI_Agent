@@ -84,7 +84,7 @@ Shows chunk count (vectors) and document count (SQLite).
 
 | Piece | Location (default) |
 |--------|---------------------|
-| SQLite catalog | `.cluny/library/library.sqlite` |
+| SQLite catalog | `.cluny/library/library.sqlite` (override filename with `CLUNY_LIBRARY_SQLITE` in `.env`) |
 | Managed file copies (`--copy`) | `.cluny/library/files/<sha256>.pdf` |
 | Vector index (Chroma) | `.cluny/chroma/` |
 

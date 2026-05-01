@@ -15,7 +15,7 @@ def _utc_now() -> str:
 
 
 def db_path(settings: Settings) -> Path:
-    p = settings.data_dir / "library" / "library.sqlite"
+    p = settings.data_dir / "library" / settings.library_sqlite_name
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
