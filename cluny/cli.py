@@ -8,7 +8,7 @@ import typer
 
 from cluny.config import Settings, load_dotenv_if_present
 from cluny.documents import add_file
-from cluny.extract import ExtractionError
+from cluny.extract import ExtractionError, list_ingestable_files
 from cluny.ingest import ingest_string
 from cluny.library_db import DocumentRow, connect, document_count, list_documents
 from cluny.ollama_client import OllamaClient, OllamaError
@@ -65,6 +65,94 @@ def add(
         raise typer.Exit(code=1) from e
 
     typer.echo(f"Indexed {n} chunk(s). doc_id={doc_id}")
+
+
+@app.command("add-dir")
+def add_dir(
+    directory: Path = typer.Argument(..., help="Folder to scan for PDF / Markdown / text / journal files."),
+    recursive: bool = typer.Option(
+        True,
+        "--recursive/--flat",
+        "-r/",
+        help="Scan subfolders (default) or only the top-level directory.",
+    ),
+    copy: bool = typer.Option(
+        False,
+        "--copy",
+        "-c",
+        help="Same as cluny add --copy for every file.",
+    ),
+    relative_titles: bool = typer.Option(
+        True,
+        "--relative-titles/--basename-titles",
+        help="Use paths relative to DIRECTORY as catalog titles (recommended for trees).",
+    ),
+    include_hidden: bool = typer.Option(
+        False,
+        "--include-hidden",
+        help="Also ingest files inside dot-folders (e.g. .git is still skipped by extension).",
+    ),
+    fail_fast: bool = typer.Option(
+        False,
+        "--fail-fast",
+        help="Stop on the first file that errors.",
+    ),
+    chunk_size: int = typer.Option(1200),
+    overlap: int = typer.Option(200),
+) -> None:
+    """Ingest every supported file under a directory (batch `cluny add`)."""
+    settings = Settings.from_env()
+    collection = get_collection(settings)
+    ollama = OllamaClient(settings)
+
+    try:
+        files = list_ingestable_files(
+            directory,
+            recursive=recursive,
+            include_hidden=include_hidden,
+        )
+    except ExtractionError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+
+    if not files:
+        typer.echo("No matching files (.pdf, .md, .txt, .journal, …).")
+        raise typer.Exit(code=0)
+
+    root = directory.expanduser().resolve()
+    ok = 0
+    failed = 0
+    for path in files:
+        title: str | None
+        if relative_titles:
+            try:
+                title = path.relative_to(root).as_posix()
+            except ValueError:
+                title = path.name
+        else:
+            title = None
+
+        try:
+            _, n = add_file(
+                settings,
+                collection,
+                ollama,
+                path,
+                copy_into_library=copy,
+                title=title,
+                chunk_size=chunk_size,
+                overlap=overlap,
+            )
+        except (FileNotFoundError, ExtractionError, OllamaError) as e:
+            failed += 1
+            typer.echo(f"[skip] {path}: {e}", err=True)
+            if fail_fast:
+                raise typer.Exit(code=1) from e
+            continue
+        ok += 1
+        typer.echo(f"[ok] {n} chunks  {title or path.name}")
+
+    typer.echo(f"Done. Indexed {ok} file(s), {failed} skipped/failed.")
 
 
 @app.command()

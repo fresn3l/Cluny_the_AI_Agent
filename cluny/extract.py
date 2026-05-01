@@ -10,6 +10,50 @@ from pypdf import PdfReader
 class ExtractionError(ValueError):
     pass
 
+# Suffixes we can read without extra converters (keep in sync with extract_text)
+SUPPORTED_SUFFIXES: frozenset[str] = frozenset(
+    {".pdf", ".md", ".markdown", ".mdown", ".txt", ".text", ".journal", ".entry"}
+)
+
+
+def is_supported_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES
+
+
+def list_ingestable_files(
+    root: Path,
+    *,
+    recursive: bool = True,
+    include_hidden: bool = False,
+) -> list[Path]:
+    """
+    Paths under root that Cluny can ingest, sorted. Skips directories and
+    unsupported extensions; when include_hidden is False, skips files under
+    a path segment starting with '.' (e.g. .git, .venv).
+    """
+    root = root.expanduser().resolve()
+    if not root.is_dir():
+        raise ExtractionError(f"Not a directory: {root}")
+
+    candidates: list[Path]
+    if recursive:
+        candidates = [p for p in root.rglob("*") if p.is_file()]
+    else:
+        candidates = [p for p in root.iterdir() if p.is_file()]
+
+    out: list[Path] = []
+    for p in candidates:
+        if not include_hidden:
+            try:
+                rel = p.relative_to(root)
+            except ValueError:
+                continue
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+        if is_supported_file(p):
+            out.append(p)
+    return sorted(out)
+
 
 def extract_text(path: Path) -> tuple[str, str]:
     """

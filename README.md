@@ -58,6 +58,16 @@ List everything in the catalog:
 cluny library list
 ```
 
+**Batch a whole folder** (every `.pdf`, `.md`, `.txt`, `.journal` under the path; skips dot-folders like `.git` unless you pass `--include-hidden`):
+
+```bash
+cluny add-dir ~/Research/papers
+cluny add-dir ./notes --flat                 # only files directly in ./notes
+cluny add-dir ~/Inbox --copy --fail-fast    # stop on first error
+```
+
+By default, **`--relative-titles`** uses paths like `subdir/paper.pdf` as the catalog title so names stay unique.
+
 The legacy command **`cluny ingest`** does the same indexing without `--copy` (still writes to the SQLite catalog).
 
 ### Paste text (no catalog row)
