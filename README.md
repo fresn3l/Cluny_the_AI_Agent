@@ -26,6 +26,13 @@ pip install -e .
 cp .env.example .env
 ```
 
+### Moved the project folder?
+
+- Recreate or reinstall the virtualenv and run **`pip install -e .` again** from the new path (editable installs remember the old directory).
+- Default **`.cluny`** is resolved **next to `pyproject.toml`**, so you can run `cluny` from subfolders without writing data to the wrong place.
+- **`.env`** is loaded from the repo root first (then the current directory). If you used an **absolute** `CLUNY_DATA_DIR`, update it to the new location—or use the default relative `.cluny`.
+- Copy your old **`.cluny`** directory into the repo if you want to keep the existing index and SQLite catalog.
+
 ## Usage
 
 ### Add files to your library (recommended)

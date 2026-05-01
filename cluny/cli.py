@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from cluny.config import Settings
+from cluny.config import Settings, load_dotenv_if_present
 from cluny.documents import add_file
 from cluny.extract import ExtractionError
 from cluny.ingest import ingest_string
@@ -223,11 +223,7 @@ def library_list() -> None:
 
 
 def main() -> None:
-    from dotenv import load_dotenv
-
-    env = Path(".env")
-    if env.is_file():
-        load_dotenv(env)
+    load_dotenv_if_present()
     app()
 
 
