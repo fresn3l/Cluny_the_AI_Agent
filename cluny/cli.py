@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from cluny.config import Settings, load_dotenv_if_present
-from cluny.documents import add_file
+from cluny.documents import add_file, add_url
 from cluny.extract import ExtractionError, list_ingestable_files
 from cluny.ingest import ingest_string
 from cluny.library_db import DocumentRow, connect, document_count, list_documents
@@ -37,6 +37,11 @@ def add(
     ),
     chunk_size: int = typer.Option(1200, help="Max characters per chunk."),
     overlap: int = typer.Option(200, help="Overlap between consecutive chunks."),
+    pdf_ocr: str | None = typer.Option(
+        None,
+        "--pdf-ocr",
+        help="Override CLUNY_PDF_OCR for PDFs: auto | always | never.",
+    ),
 ) -> None:
     """Register a file in the local library DB and index it for search."""
     settings = Settings.from_env()
@@ -53,6 +58,7 @@ def add(
             title=title,
             chunk_size=chunk_size,
             overlap=overlap,
+            pdf_ocr=pdf_ocr,
         )
     except FileNotFoundError as e:
         typer.echo(str(e), err=True)
@@ -65,6 +71,43 @@ def add(
         raise typer.Exit(code=1) from e
 
     typer.echo(f"Indexed {n} chunk(s). doc_id={doc_id}")
+
+
+@app.command("add-url")
+def add_url_cmd(
+    url: str = typer.Argument(..., help="Web page (HTML) or direct PDF URL."),
+    title: str | None = typer.Option(
+        None,
+        "--title",
+        "-t",
+        help="Catalog title (defaults to article title or URL).",
+    ),
+    chunk_size: int = typer.Option(1200),
+    overlap: int = typer.Option(200),
+) -> None:
+    """Fetch a URL, extract main article text or PDF, index with source URL metadata."""
+    settings = Settings.from_env()
+    collection = get_collection(settings)
+    ollama = OllamaClient(settings)
+
+    try:
+        doc_id, n = add_url(
+            settings,
+            collection,
+            ollama,
+            url,
+            title=title,
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+    except ExtractionError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    except OllamaError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+
+    typer.echo(f"Indexed {n} chunk(s) from URL. doc_id={doc_id}")
 
 
 @app.command("add-dir")
@@ -99,6 +142,11 @@ def add_dir(
     ),
     chunk_size: int = typer.Option(1200),
     overlap: int = typer.Option(200),
+    pdf_ocr: str | None = typer.Option(
+        None,
+        "--pdf-ocr",
+        help="Override CLUNY_PDF_OCR for PDFs in this folder.",
+    ),
 ) -> None:
     """Ingest every supported file under a directory (batch `cluny add`)."""
     settings = Settings.from_env()
@@ -142,6 +190,7 @@ def add_dir(
                 title=title,
                 chunk_size=chunk_size,
                 overlap=overlap,
+                pdf_ocr=pdf_ocr,
             )
         except (FileNotFoundError, ExtractionError, OllamaError) as e:
             failed += 1
@@ -160,6 +209,11 @@ def ingest(
     path: Path = typer.Argument(..., help="PDF, Markdown, or plain text file."),
     chunk_size: int = typer.Option(1200, help="Max characters per chunk."),
     overlap: int = typer.Option(200, help="Overlap between consecutive chunks."),
+    pdf_ocr: str | None = typer.Option(
+        None,
+        "--pdf-ocr",
+        help="Override CLUNY_PDF_OCR for PDFs: auto | always | never.",
+    ),
 ) -> None:
     """Same as `add` without --copy (kept for backward compatibility)."""
     settings = Settings.from_env()
@@ -176,6 +230,7 @@ def ingest(
             title=None,
             chunk_size=chunk_size,
             overlap=overlap,
+            pdf_ocr=pdf_ocr,
         )
     except FileNotFoundError as e:
         typer.echo(str(e), err=True)
@@ -256,6 +311,9 @@ def ask(
         src = ""
         if isinstance(meta, dict):
             src = str(meta.get("source", ""))
+            surl = meta.get("source_url")
+            if surl:
+                src = f"{src} | {surl}" if src else str(surl)
         prefix = f"[{src}]\n" if src else ""
         context_blocks.append(f"{prefix}{doc}")
 

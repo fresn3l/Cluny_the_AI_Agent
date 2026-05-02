@@ -1,4 +1,4 @@
-# Cluny
+# Cluny_the_AI_Agent
 
 Local-first **second brain**: index PDFs, notes, and journal-style files into a **SQLite catalog** plus a **local vector index**, then ask questions with **Ollama** (no cloud LLM required). Everything lives under `.cluny/` by default.
 
@@ -18,15 +18,28 @@ Adjust names in `.env` if you prefer other models.
 
 ## Setup
 
+**Easiest (recommended if `source .venv/bin/activate` does not put `cluny` on your PATH):**
+
 ```bash
-cd Cluny
+cd Cluny_the_AI_Agent
+chmod +x setup_venv.sh run_cluny.sh
+./setup_venv.sh
+cp .env.example .env
+./run_cluny.sh stats
+./run_cluny.sh ask "What is indexed in Cluny?"
+```
+
+Manual venv:
+
+```bash
+cd Cluny_the_AI_Agent
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+./.venv/bin/python -m pip install -U pip
+./.venv/bin/python -m pip install -e .
 cp .env.example .env
 ```
 
-The repository directory is usually named **`Cluny`** (clone or rename the old `Cluny_the_AI_Agent` folder if you still have it). The Git remote on GitHub can keep the same URL, or you can rename the repository in GitHub’s settings to match.
+Then either `./run_cluny.sh …` or `source .venv/bin/activate` and `cluny …`. If `cluny` is “not found” after activate, your shell left Homebrew’s Python first on `PATH` — keep using **`./run_cluny.sh`**.
 
 ### Moved the project folder?
 
@@ -71,6 +84,26 @@ cluny add-dir ~/Inbox --copy --fail-fast    # stop on first error
 By default, **`--relative-titles`** uses paths like `subdir/paper.pdf` as the catalog title so names stay unique.
 
 The legacy command **`cluny ingest`** does the same indexing without `--copy` (still writes to the SQLite catalog).
+
+### URLs (HTML or PDF)
+
+Fetches a page, extracts the main article with **trafilatura** (HTML) or the text layer / **OCR** (PDF), and stores **`source_url`**, fetch time, and MIME type in chunk metadata.
+
+```bash
+cluny add-url "https://example.com/article"
+cluny add-url "https://arxiv.org/pdf/…" --title "Paper title"
+```
+
+**Rules** (see `.env.example`): `CLUNY_URL_MODE=open` (default) or `restricted` with `CLUNY_URL_ALLOWLIST`, optional `CLUNY_URL_BLOCKLIST`, `CLUNY_URL_MAX_BYTES`, `CLUNY_URL_TIMEOUT_SEC`.
+
+### Scanned PDFs (OCR)
+
+For local PDFs, `CLUNY_PDF_OCR=auto` tries a normal text layer first, then **Tesseract** via PyMuPDF if the layer is empty. Set `always` to OCR every page, or `never` to reject scans. Install **Tesseract** on the system (e.g. `brew install tesseract`) in addition to Python deps.
+
+```bash
+cluny add scan.pdf
+cluny add scan.pdf --pdf-ocr always
+```
 
 ### Paste text (no catalog row)
 

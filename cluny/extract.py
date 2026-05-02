@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -9,6 +10,7 @@ from pypdf import PdfReader
 
 class ExtractionError(ValueError):
     pass
+
 
 # Suffixes we can read without extra converters (keep in sync with extract_text)
 SUPPORTED_SUFFIXES: frozenset[str] = frozenset(
@@ -55,16 +57,16 @@ def list_ingestable_files(
     return sorted(out)
 
 
-def extract_text(path: Path) -> tuple[str, str]:
+def extract_text(path: Path, pdf_ocr: str = "auto") -> tuple[str, str]:
     """
-    Return (text, kind) where kind is one of: pdf, markdown, text, journal.
+    Return (text, kind). For PDFs, ``pdf_ocr`` is auto | always | never (see CLUNY_PDF_OCR).
     """
     if not path.is_file():
         raise ExtractionError(f"Not a file: {path}")
 
     suffix = path.suffix.lower()
     if suffix == ".pdf":
-        return _pdf_text(path), "pdf"
+        return _extract_pdf(path, pdf_ocr)
     if suffix in {".md", ".markdown", ".mdown"}:
         return path.read_text(encoding="utf-8", errors="replace"), "markdown"
     if suffix in {".txt", ".text"}:
@@ -78,7 +80,7 @@ def extract_text(path: Path) -> tuple[str, str]:
     )
 
 
-def _pdf_text(path: Path) -> str:
+def _pdf_text_layer(path: Path) -> str:
     try:
         reader = PdfReader(str(path))
     except Exception as e:
@@ -93,9 +95,68 @@ def _pdf_text(path: Path) -> str:
         if t:
             parts.append(t)
 
-    text = "\n\n".join(parts).strip()
-    if not text:
+    return "\n\n".join(parts).strip()
+
+
+def _extract_pdf(path: Path, pdf_ocr: str) -> tuple[str, str]:
+    mode = pdf_ocr.strip().lower()
+    if mode not in ("auto", "always", "never"):
+        mode = "auto"
+
+    layer = _pdf_text_layer(path)
+
+    if mode == "always":
+        text = _pdf_ocr(path)
+        if not text.strip():
+            raise ExtractionError("OCR produced no text from PDF.")
+        return text, "pdf-scanned"
+
+    if layer:
+        return layer, "pdf"
+
+    if mode == "never":
         raise ExtractionError(
-            "No text extracted from PDF. Scanned pages need OCR (not built into Cluny yet)."
+            "No text layer in PDF and CLUNY_PDF_OCR=never. "
+            "For scanned PDFs set CLUNY_PDF_OCR=auto or install OCR dependencies."
         )
-    return text
+
+    text = _pdf_ocr(path)
+    if not text.strip():
+        raise ExtractionError(
+            "OCR produced no text. Check that Tesseract is installed (e.g. brew install tesseract)."
+        )
+    return text, "pdf-scanned"
+
+
+def _pdf_ocr(path: Path) -> str:
+    try:
+        import fitz  # PyMuPDF
+        import pytesseract
+        from PIL import Image
+    except ImportError as e:
+        raise ExtractionError(
+            "PDF OCR needs PyMuPDF, pytesseract, and Pillow. "
+            "Install: pip install pymupdf pytesseract Pillow "
+            "and the Tesseract engine (e.g. brew install tesseract)."
+        ) from e
+
+    try:
+        doc = fitz.open(str(path))
+    except Exception as e:
+        raise ExtractionError(f"Could not open PDF for OCR: {e}") from e
+
+    parts: list[str] = []
+    matrix = fitz.Matrix(2.0, 2.0)
+    try:
+        for i in range(len(doc)):
+            page = doc.load_page(i)
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            png = pix.tobytes("png")
+            img = Image.open(io.BytesIO(png))
+            chunk = pytesseract.image_to_string(img)
+            if chunk.strip():
+                parts.append(chunk.strip())
+    finally:
+        doc.close()
+
+    return "\n\n".join(parts).strip()
