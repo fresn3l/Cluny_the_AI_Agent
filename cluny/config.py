@@ -12,6 +12,24 @@ def _get(key: str, default: str) -> str:
     return v.strip() if v else default
 
 
+def _int(key: str, default: int) -> int:
+    try:
+        return int(_get(key, str(default)))
+    except ValueError:
+        return default
+
+
+def _float(key: str, default: float) -> float:
+    try:
+        return float(_get(key, str(default)))
+    except ValueError:
+        return default
+
+
+def _host_set(key: str) -> frozenset[str]:
+    return frozenset(x.strip().lower() for x in _get(key, "").split(",") if x.strip())
+
+
 def find_repo_root() -> Path | None:
     """
     Directory that contains this project's pyproject.toml.
@@ -61,6 +79,13 @@ class Settings:
     data_dir: Path
     catalog_dir_name: str
     library_sqlite_name: str
+    pdf_ocr_mode: str
+    url_mode: str
+    url_allow_hosts: frozenset[str]
+    url_block_hosts: frozenset[str]
+    url_max_bytes: int
+    url_timeout_sec: float
+    url_user_agent: str
 
     @property
     def catalog_root(self) -> Path:
@@ -75,6 +100,15 @@ class Settings:
         raw_name = _get("CLUNY_LIBRARY_SQLITE", "library.sqlite")
         # basename only so env cannot escape CLUNY_DATA_DIR/<catalog>/
         safe_name = Path(raw_name).name or "library.sqlite"
+
+        ocr = _get("CLUNY_PDF_OCR", "auto").lower()
+        if ocr not in ("auto", "always", "never"):
+            ocr = "auto"
+
+        url_mode = _get("CLUNY_URL_MODE", "open").lower()
+        if url_mode not in ("open", "restricted"):
+            url_mode = "open"
+
         return cls(
             ollama_base_url=_get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
             chat_model=_get("OLLAMA_CHAT_MODEL", "llama3.2"),
@@ -82,4 +116,14 @@ class Settings:
             data_dir=data,
             catalog_dir_name=catalog_dir_name,
             library_sqlite_name=safe_name,
+            pdf_ocr_mode=ocr,
+            url_mode=url_mode,
+            url_allow_hosts=_host_set("CLUNY_URL_ALLOWLIST"),
+            url_block_hosts=_host_set("CLUNY_URL_BLOCKLIST"),
+            url_max_bytes=max(1_000_000, _int("CLUNY_URL_MAX_BYTES", 15_000_000)),
+            url_timeout_sec=max(5.0, _float("CLUNY_URL_TIMEOUT_SEC", 30.0)),
+            url_user_agent=_get(
+                "CLUNY_URL_USER_AGENT",
+                "Cluny/0.1 (+local second brain; respectful crawling)",
+            ),
         )
