@@ -18,13 +18,28 @@ Adjust names in `.env` if you prefer other models.
 
 ## Setup
 
+**Easiest (recommended if `source .venv/bin/activate` does not put `cluny` on your PATH):**
+
+```bash
+cd Cluny_the_AI_Agent
+chmod +x setup_venv.sh run_cluny.sh
+./setup_venv.sh
+cp .env.example .env
+./run_cluny.sh stats
+./run_cluny.sh ask "What is indexed in Cluny?"
+```
+
+Manual venv:
+
 ```bash
 cd Cluny_the_AI_Agent
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+./.venv/bin/python -m pip install -U pip
+./.venv/bin/python -m pip install -e .
 cp .env.example .env
 ```
+
+Then either `./run_cluny.sh …` or `source .venv/bin/activate` and `cluny …`. If `cluny` is “not found” after activate, your shell left Homebrew’s Python first on `PATH` — keep using **`./run_cluny.sh`**.
 
 ### Moved the project folder?
 
