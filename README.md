@@ -1,4 +1,4 @@
-# Cluny_the_AI_Agent
+# Cluny
 
 Local-first **second brain**: index PDFs, notes, and journal-style files into a **SQLite catalog** plus a **local vector index**, then ask questions with **Ollama** (no cloud LLM required). Everything lives under `.cluny/` by default.
 
@@ -19,12 +19,14 @@ Adjust names in `.env` if you prefer other models.
 ## Setup
 
 ```bash
-cd Cluny_the_AI_Agent
+cd Cluny
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 cp .env.example .env
 ```
+
+The repository directory is usually named **`Cluny`** (clone or rename the old `Cluny_the_AI_Agent` folder if you still have it). The Git remote on GitHub can keep the same URL, or you can rename the repository in GitHub’s settings to match.
 
 ### Moved the project folder?
 
