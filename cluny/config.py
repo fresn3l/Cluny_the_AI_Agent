@@ -86,6 +86,10 @@ class Settings:
     url_max_bytes: int
     url_timeout_sec: float
     url_user_agent: str
+    hybrid_vector_weight: float
+    retrieval_k: int
+    ollama_timeout_sec: float
+    ollama_retries: int
 
     @property
     def catalog_root(self) -> Path:
@@ -126,4 +130,8 @@ class Settings:
                 "CLUNY_URL_USER_AGENT",
                 "Cluny/0.1 (+local second brain; respectful crawling)",
             ),
+            hybrid_vector_weight=max(0.0, min(1.0, _float("CLUNY_HYBRID_VECTOR_WEIGHT", 0.5))),
+            retrieval_k=max(1, _int("CLUNY_RETRIEVAL_K", 20)),
+            ollama_timeout_sec=max(10.0, _float("OLLAMA_TIMEOUT_SEC", 120.0)),
+            ollama_retries=max(0, _int("OLLAMA_RETRIES", 2)),
         )

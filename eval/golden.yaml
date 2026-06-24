@@ -1,0 +1,21 @@
+# Golden questions for `cluny eval`.
+# Add expect_sources with substrings that should appear in retrieved doc paths.
+# Set expect_refusal: true when the answer should admit missing information.
+
+- question: "What is indexed in Cluny?"
+  k: 3
+
+- question: "What did the Smith paper say about working memory?"
+  expect_sources: ["smith"]
+  k: 5
+
+- question: "What is the capital of Atlantis?"
+  expect_refusal: true
+  k: 3
+
+- question: "Summarize my journal entries about travel."
+  k: 5
+
+- question: "Find notes mentioning attention limits."
+  expect_sources: []
+  k: 5

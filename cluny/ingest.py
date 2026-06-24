@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 from chromadb.api.models.Collection import Collection
 
@@ -24,11 +23,13 @@ def ingest_string(
     max_chars: int = 1200,
     overlap: int = 200,
     extra_metadata: dict[str, str] | None = None,
-) -> int:
-    """Chunk, embed, and upsert. Returns number of chunks stored."""
+    *,
+    return_chunks: bool = False,
+) -> int | tuple[int, list[str]]:
+    """Chunk, embed, and upsert. Returns chunk count, or (count, chunk texts) if requested."""
     parts = chunk_text(text, max_chars=max_chars, overlap=overlap)
     if not parts:
-        return 0
+        return (0, []) if return_chunks else 0
 
     base = _source_id(text, source_label)
     ids: list[str] = []
@@ -47,8 +48,6 @@ def ingest_string(
         embeddings.append(ollama.embed(part))
 
     collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
+    if return_chunks:
+        return len(parts), parts
     return len(parts)
-
-
-def read_file_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")

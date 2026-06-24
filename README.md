@@ -54,7 +54,7 @@ Then either `./run_cluny.sh …` or `source .venv/bin/activate` and `cluny …`.
 
 Registers the document in **`library.sqlite`** and indexes chunks into Chroma for search.
 
-Supported extensions: **`.pdf`**, **`.md`**, **`.txt`**, **`.journal`** (same as text).
+Supported extensions: **`.pdf`**, **`.md`**, **`.txt`**, **`.json`** (pretty-printed for indexing), **`.journal`** (same as text).
 
 ```bash
 cluny add ~/Research/paper.pdf --title "Smith 2024 — attention limits"
@@ -73,7 +73,7 @@ List everything in the catalog:
 cluny library list
 ```
 
-**Batch a whole folder** (every `.pdf`, `.md`, `.txt`, `.journal` under the path; skips dot-folders like `.git` unless you pass `--include-hidden`):
+**Batch a whole folder** (every `.pdf`, `.md`, `.txt`, `.json`, `.journal` under the path; skips dot-folders like `.git` unless you pass `--include-hidden`):
 
 ```bash
 cluny add-dir ~/Research/papers
@@ -84,6 +84,17 @@ cluny add-dir ~/Inbox --copy --fail-fast    # stop on first error
 By default, **`--relative-titles`** uses paths like `subdir/paper.pdf` as the catalog title so names stay unique.
 
 The legacy command **`cluny ingest`** does the same indexing without `--copy` (still writes to the SQLite catalog).
+
+### Watch a folder (live updates)
+
+Runs an initial ingest like `add-dir`, then watches recursively for new or changed files and re-indexes them after a short debounce (handles editors that save in multiple steps). Stop with **Ctrl+C**. Catalog titles use paths relative to the watched root.
+
+```bash
+cluny watch "/Users/you/Library/Application Support/ToDo/Journal"
+# Or set CLUNY_WATCH_PATH to that folder and run: cluny watch
+```
+
+On macOS, Terminal (or your IDE) may need **Full Disk Access** or **Files and Folders → Application Support** so Python can read `~/Library/Application Support/…`. Only extensions Cluny supports are indexed (see **Add files** above); other formats need a custom extractor or export.
 
 ### URLs (HTML or PDF)
 
@@ -117,6 +128,17 @@ cluny ingest-text "Quick capture..." --source "inline-note"
 cluny ask "What did the Smith paper say about working memory?"
 ```
 
+### Desktop app (no browser, no HTTP)
+
+Native **PySide6** window: same RAG as `cluny ask`, with a chat transcript, optional **source** previews, and a sidebar for index **stats** and retrieval **k**.
+
+```bash
+cluny gui
+# or: python -m cluny.gui
+```
+
+Ollama must be running; ingest notes first (`cluny add`, `cluny add-dir`, etc.).
+
 ### Stats
 
 ```bash
@@ -137,8 +159,29 @@ Set `CLUNY_DATA_DIR` in `.env` to move the whole tree (e.g. an external drive).
 
 ## PDF notes
 
-- Text is extracted from the PDF **text layer**. Scanned pages only contain images — you’ll see an error until you add OCR (not included yet).
+- Text is extracted from the PDF **text layer** by default. For scanned PDFs, set `CLUNY_PDF_OCR=auto` (or `always`) and install **Tesseract** (`brew install tesseract`).
 - Very large PDFs are split into overlapping **chunks** before embedding.
+
+## Catalog management
+
+```bash
+cluny library list
+cluny library list --tag research
+cluny library show <id-prefix>
+cluny library delete <path-or-id>
+cluny tag add <id-prefix> research
+cluny tag list
+```
+
+## Search and agent
+
+```bash
+cluny search "working memory"    # retrieval only (no LLM)
+cluny ask "…"                  # streams by default; use --no-stream for scripts
+cluny agent "…"                  # tool loop (search_brain, add_note)
+cluny eval                       # golden-question regression harness
+cluny export backup.zip          # snapshot CLUNY_DATA_DIR
+```
 
 ## Privacy
 

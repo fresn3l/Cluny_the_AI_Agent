@@ -1,8 +1,9 @@
-"""Load plain text from supported file types (PDF, Markdown, plain text)."""
+"""Load plain text from supported file types (PDF, Markdown, plain text, JSON)."""
 
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -14,7 +15,17 @@ class ExtractionError(ValueError):
 
 # Suffixes we can read without extra converters (keep in sync with extract_text)
 SUPPORTED_SUFFIXES: frozenset[str] = frozenset(
-    {".pdf", ".md", ".markdown", ".mdown", ".txt", ".text", ".journal", ".entry"}
+    {
+        ".pdf",
+        ".md",
+        ".markdown",
+        ".mdown",
+        ".txt",
+        ".text",
+        ".journal",
+        ".entry",
+        ".json",
+    }
 )
 
 
@@ -73,11 +84,47 @@ def extract_text(path: Path, pdf_ocr: str = "auto") -> tuple[str, str]:
         return path.read_text(encoding="utf-8", errors="replace"), "text"
     if suffix in {".journal", ".entry"}:
         return path.read_text(encoding="utf-8", errors="replace"), "journal"
+    if suffix == ".json":
+        return _extract_json(path)
 
     raise ExtractionError(
         f"Unsupported extension {suffix!r}. "
-        f"Use .pdf, .md, .txt, or .journal (or add conversion yourself)."
+        f"Use .pdf, .md, .txt, .json, or .journal (or add conversion yourself)."
     )
+
+
+def _extract_json(path: Path) -> tuple[str, str]:
+    """
+    Normalize JSON to indented UTF-8 text for embedding. Supports a single
+    document or NDJSON (one JSON value per non-empty line).
+    """
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    if not raw.strip():
+        raise ExtractionError("JSON file is empty.")
+
+    stripped = raw.strip()
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        data = None
+    else:
+        return json.dumps(data, ensure_ascii=False, indent=2), "json"
+
+    blocks: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        blocks.append(json.dumps(item, ensure_ascii=False, indent=2))
+
+    if blocks:
+        return "\n\n---\n\n".join(blocks), "json-lines"
+
+    return raw, "text"
 
 
 def _pdf_text_layer(path: Path) -> str:
