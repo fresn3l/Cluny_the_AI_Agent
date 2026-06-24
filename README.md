@@ -185,6 +185,11 @@ cluny tasks list
 cluny eval                       # golden-question regression harness
 cluny export backup.zip          # snapshot CLUNY_DATA_DIR
 cluny import backup.zip          # restore from export
+cluny collection create research
+cluny search "…" --collection research
+cluny library dedup
+cluny chat "What's due this week?"   # supervisor routing
+cluny calendar import calendar.ics
 ```
 
 ## Privacy

@@ -148,7 +148,7 @@ def retrieve(
         pool = max(pool, k * 3)
 
     conn = connect(settings)
-    fts_rows = fts_search(conn, question, limit=pool)
+    fts_rows = fts_search(conn, question, limit=pool, doc_ids=doc_ids)
     fts_ranked: list[tuple[str, int, str, str, str | None]] = []
     for doc_id, chunk_index, text in fts_rows:
         if doc_ids is not None and doc_id not in doc_ids:

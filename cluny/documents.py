@@ -20,6 +20,7 @@ from cluny.library_db import (
     connect,
     delete_chunks_for_doc,
     delete_document_row,
+    find_by_content_hash,
     get_by_path,
     replace_chunks,
     resolve_document,
@@ -111,6 +112,7 @@ def add_file(
     chunk_size: int = 1200,
     overlap: int = 200,
     pdf_ocr: str | None = None,
+    replace: bool = False,
 ) -> IndexResult:
     """
     Extract text, record in SQLite, embed chunks. Returns IndexResult.
@@ -144,7 +146,14 @@ def add_file(
     existing = get_by_path(conn, str(work_path))
     doc_id = existing.id if existing else uuid.uuid4().hex
 
-    if existing and existing.content_hash == chash:
+    if replace and not existing:
+        for dup in find_by_content_hash(conn, chash):
+            if dup.path != str(work_path):
+                _delete_vectors(collection, dup.id)
+                delete_chunks_for_doc(conn, dup.id)
+                delete_document_row(conn, dup.id)
+
+    if existing and existing.content_hash == chash and not replace:
         conn.close()
         log.debug("Skipping unchanged file %s", work_path)
         return IndexResult(doc_id=doc_id, chunk_count=existing.chunk_count, unchanged=True)

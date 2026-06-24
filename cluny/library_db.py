@@ -82,6 +82,25 @@ def init_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS document_collections (
+            doc_id TEXT NOT NULL,
+            collection_id INTEGER NOT NULL,
+            PRIMARY KEY (doc_id, collection_id),
+            FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE,
+            FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE
+        );
+        """
+    )
     conn.commit()
 
 
@@ -220,6 +239,7 @@ def fts_search(
     query: str,
     *,
     limit: int = 10,
+    doc_ids: frozenset[str] | None = None,
 ) -> list[tuple[str, int, str]]:
     """Return (doc_id, chunk_index, text) rows ranked by FTS5."""
     q = query.strip()
@@ -237,17 +257,32 @@ def fts_search(
         ORDER BY rank
         LIMIT ?
         """,
-        (fts_q, limit),
+        (fts_q, limit * 3 if doc_ids else limit),
     )
-    return [(str(r[0]), int(r[1]), str(r[2])) for r in cur.fetchall()]
+    rows = [(str(r[0]), int(r[1]), str(r[2])) for r in cur.fetchall()]
+    if doc_ids is not None:
+        rows = [r for r in rows if r[0] in doc_ids]
+    return rows[:limit]
 
 
 def list_documents(
     conn: sqlite3.Connection,
     *,
     tag: str | None = None,
+    collection: str | None = None,
 ) -> list[DocumentRow]:
-    if tag:
+    if collection:
+        cur = conn.execute(
+            """
+            SELECT d.* FROM documents d
+            JOIN document_collections dc ON d.id = dc.doc_id
+            JOIN collections c ON dc.collection_id = c.id
+            WHERE c.name = ? COLLATE NOCASE
+            ORDER BY d.ingested_at DESC
+            """,
+            (collection.strip(),),
+        )
+    elif tag:
         cur = conn.execute(
             """
             SELECT d.* FROM documents d
@@ -322,3 +357,78 @@ def get_chunk_with_meta(
     if row is None:
         return None
     return str(row[1]), (str(row[2]) if row[2] is not None else None), str(row[0])
+
+
+def list_collections(conn: sqlite3.Connection) -> list[str]:
+    cur = conn.execute("SELECT name FROM collections ORDER BY name COLLATE NOCASE")
+    return [str(r[0]) for r in cur.fetchall()]
+
+
+def create_collection(conn: sqlite3.Connection, name: str) -> None:
+    n = name.strip()
+    if not n:
+        raise ValueError("Collection name cannot be empty.")
+    conn.execute("INSERT OR IGNORE INTO collections (name) VALUES (?)", (n,))
+    conn.commit()
+
+
+def add_doc_to_collection(conn: sqlite3.Connection, doc_id: str, collection_name: str) -> None:
+    create_collection(conn, collection_name)
+    cur = conn.execute(
+        "SELECT id FROM collections WHERE name = ? COLLATE NOCASE",
+        (collection_name.strip(),),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise ValueError(f"Collection not found: {collection_name}")
+    coll_id = int(row[0])
+    conn.execute(
+        "INSERT OR IGNORE INTO document_collections (doc_id, collection_id) VALUES (?, ?)",
+        (doc_id, coll_id),
+    )
+    conn.commit()
+
+
+def get_collections_for_doc(conn: sqlite3.Connection, doc_id: str) -> list[str]:
+    cur = conn.execute(
+        """
+        SELECT c.name FROM collections c
+        JOIN document_collections dc ON c.id = dc.collection_id
+        WHERE dc.doc_id = ?
+        ORDER BY c.name COLLATE NOCASE
+        """,
+        (doc_id,),
+    )
+    return [str(r[0]) for r in cur.fetchall()]
+
+
+def doc_ids_in_collection(conn: sqlite3.Connection, collection_name: str) -> frozenset[str]:
+    cur = conn.execute(
+        """
+        SELECT d.id FROM documents d
+        JOIN document_collections dc ON d.id = dc.doc_id
+        JOIN collections c ON dc.collection_id = c.id
+        WHERE c.name = ? COLLATE NOCASE
+        """,
+        (collection_name.strip(),),
+    )
+    return frozenset(str(r[0]) for r in cur.fetchall())
+
+
+def find_by_content_hash(conn: sqlite3.Connection, content_hash: str) -> list[DocumentRow]:
+    cur = conn.execute("SELECT * FROM documents WHERE content_hash = ?", (content_hash,))
+    return [_row_to_doc(r) for r in cur.fetchall()]
+
+
+def duplicate_hash_groups(conn: sqlite3.Connection) -> dict[str, list[DocumentRow]]:
+    cur = conn.execute(
+        """
+        SELECT content_hash FROM documents
+        GROUP BY content_hash HAVING COUNT(*) > 1
+        """
+    )
+    groups: dict[str, list[DocumentRow]] = {}
+    for row in cur.fetchall():
+        h = str(row[0])
+        groups[h] = find_by_content_hash(conn, h)
+    return groups

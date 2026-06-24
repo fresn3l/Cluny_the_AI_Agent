@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QFont, QKeyEvent, QTextOption
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -28,10 +34,18 @@ from PySide6.QtWidgets import (
 from cluny.agent import run_agent
 from cluny.config import Settings
 from cluny.documents import add_file
-from cluny.library_db import connect, document_count, get_tags_for_doc, list_documents
+from cluny.library_db import (
+    connect,
+    document_count,
+    get_collections_for_doc,
+    get_tags_for_doc,
+    list_documents,
+)
 from cluny.ollama_client import OllamaError
-from cluny.query import RagAnswer, RagSource, rag_answer, rag_answer_stream
+from cluny.query import RagAnswer, RagSource, rag_answer_stream
+from cluny.sessions import add_message, connect as sessions_connect, get_or_create_last_session, list_messages
 from cluny.store import get_collection
+from cluny.user_config import UserConfig, load_user_config, save_user_config
 
 
 class WorkerSignals(QObject):
@@ -220,23 +234,20 @@ class _Bubble(QFrame):
 
         v.addWidget(self._text)
 
-        self._sources_widget: QTextEdit | None = None
+        self._sources_widget: QListWidget | None = None
         if sources and not empty_notice:
-            src_header = QLabel("Sources")
+            src_header = QLabel("Sources (click to open)")
             src_header.setObjectName("statsLabel")
             v.addWidget(src_header)
-            lines = []
+            src_list = QListWidget()
+            src_list.setMaximumHeight(120)
             for s in sources:
-                lines.append(f"• {s.label}\n  {s.snippet}")
-            src_body = QTextEdit()
-            src_body.setReadOnly(True)
-            src_body.setFrameStyle(QFrame.Shape.NoFrame)
-            src_body.setPlainText("\n\n".join(lines))
-            src_body.setMinimumHeight(72)
-            src_body.setMaximumHeight(160)
-            src_body.setObjectName("bubbleText")
-            v.addWidget(src_body)
-            self._sources_widget = src_body
+                item = QListWidgetItem(f"{s.label}\n{s.snippet[:120]}…" if len(s.snippet) > 120 else f"{s.label}\n{s.snippet}")
+                item.setData(Qt.ItemDataRole.UserRole, (s.doc_path, s.chunk_index, s.snippet))
+                src_list.addItem(item)
+            src_list.itemClicked.connect(self._on_source_clicked)
+            v.addWidget(src_list)
+            self._sources_widget = src_list
 
         if role == "user":
             outer.addStretch(1)
@@ -247,6 +258,19 @@ class _Bubble(QFrame):
             outer.addWidget(inner, 0, Qt.AlignmentFlag.AlignLeft)
             outer.addStretch(1)
 
+    def _on_source_clicked(self, item: QListWidgetItem) -> None:
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        path, _chunk_idx, snippet = data
+        if path and Path(path).is_file():
+            if sys.platform == "darwin":
+                subprocess.run(["open", path], check=False)
+            else:
+                QMessageBox.information(self, "Source file", path)
+        else:
+            QMessageBox.information(self, "Source excerpt", snippet or item.text())
+
     def append_text(self, token: str) -> None:
         self._text.moveCursor(self._text.textCursor().MoveOperation.End)
         self._text.insertPlainText(token)
@@ -254,18 +278,56 @@ class _Bubble(QFrame):
     def set_sources(self, sources: tuple[RagSource, ...]) -> None:
         if self._sources_widget is not None or not sources:
             return
-        src_header = QLabel("Sources")
+        src_header = QLabel("Sources (click to open)")
         src_header.setObjectName("statsLabel")
         self._inner_layout.addWidget(src_header)
-        lines = [f"• {s.label}\n  {s.snippet}" for s in sources]
-        src_body = QTextEdit()
-        src_body.setReadOnly(True)
-        src_body.setFrameStyle(QFrame.Shape.NoFrame)
-        src_body.setPlainText("\n\n".join(lines))
-        src_body.setMinimumHeight(72)
-        src_body.setMaximumHeight(160)
-        self._inner_layout.addWidget(src_body)
-        self._sources_widget = src_body
+        src_list = QListWidget()
+        src_list.setMaximumHeight(120)
+        for s in sources:
+            item = QListWidgetItem(f"{s.label}")
+            item.setData(Qt.ItemDataRole.UserRole, (s.doc_path, s.chunk_index, s.snippet))
+            src_list.addItem(item)
+        src_list.itemClicked.connect(self._on_source_clicked)
+        self._inner_layout.addWidget(src_list)
+        self._sources_widget = src_list
+
+
+class _SettingsDialog(QDialog):
+    def __init__(self, parent: QWidget | None, config: UserConfig) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Cluny settings")
+        self._config = config
+        form = QFormLayout(self)
+        self._k_spin = QSpinBox()
+        self._k_spin.setRange(1, 25)
+        self._k_spin.setValue(config.retrieval_k)
+        form.addRow("Retrieval k", self._k_spin)
+        self._hybrid = QDoubleSpinBox()
+        self._hybrid.setRange(0.0, 1.0)
+        self._hybrid.setSingleStep(0.1)
+        self._hybrid.setValue(config.hybrid_vector_weight)
+        form.addRow("Vector weight (hybrid)", self._hybrid)
+        self._chat = QTextEdit()
+        self._chat.setPlainText(config.chat_model)
+        self._chat.setMaximumHeight(36)
+        form.addRow("Chat model", self._chat)
+        self._embed = QTextEdit()
+        self._embed.setPlainText(config.embed_model)
+        self._embed.setMaximumHeight(36)
+        form.addRow("Embed model", self._embed)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def result_config(self) -> UserConfig:
+        return UserConfig(
+            chat_model=self._chat.toPlainText().strip() or self._config.chat_model,
+            embed_model=self._embed.toPlainText().strip() or self._config.embed_model,
+            retrieval_k=self._k_spin.value(),
+            hybrid_vector_weight=self._hybrid.value(),
+            agent_mode=self._config.agent_mode,
+        )
 
 
 class MainWindow(QMainWindow):
@@ -280,6 +342,10 @@ class MainWindow(QMainWindow):
         self._thread_pool = QThreadPool.globalInstance()
         self._stream_bubble: _Bubble | None = None
         self._pending_sources: tuple[RagSource, ...] = ()
+        self._settings = Settings.from_env()
+        self._user_config = load_user_config(self._settings)
+        self._sess_conn = sessions_connect(self._settings)
+        self._session_id = get_or_create_last_session(self._sess_conn)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -320,9 +386,28 @@ class MainWindow(QMainWindow):
         splitter.setSizes([280, 820])
 
         self._build_menu()
-        self._append_assistant_welcome()
+        self._restore_transcript()
         self._refresh_stats()
         self._refresh_library()
+        self._k_spin.setValue(self._user_config.retrieval_k)
+        idx = {"ask": 0, "knowledge": 1, "tasks": 2, "all": 3}.get(self._user_config.agent_mode, 0)
+        self._agent_combo.setCurrentIndex(idx)
+
+    def closeEvent(self, event) -> None:  # noqa: ANN001, N802
+        if hasattr(self, "_sess_conn") and self._sess_conn:
+            self._sess_conn.close()
+        super().closeEvent(event)
+
+    def _restore_transcript(self) -> None:
+        msgs = list_messages(self._sess_conn, self._session_id)
+        if not msgs:
+            self._append_assistant_welcome()
+            return
+        for m in msgs:
+            if m.role == "user":
+                self._insert_bubble(_Bubble(role="user", body=m.content))
+            elif m.role == "assistant":
+                self._insert_bubble(_Bubble(role="assistant", body=m.content))
 
     def _build_menu(self) -> None:
         bar = self.menuBar()
@@ -330,6 +415,10 @@ class MainWindow(QMainWindow):
         add_a = QAction("&Add documents…", self)
         add_a.triggered.connect(self._add_documents)
         file_menu.addAction(add_a)
+        file_menu.addSeparator()
+        settings_a = QAction("&Settings…", self)
+        settings_a.triggered.connect(self._open_settings)
+        file_menu.addAction(settings_a)
         file_menu.addSeparator()
         quit_a = QAction("&Quit", self)
         quit_a.setShortcut("Ctrl+Q")
@@ -385,7 +474,7 @@ class MainWindow(QMainWindow):
         v.addWidget(QLabel("Chunks to retrieve (k)"))
         self._k_spin = QSpinBox()
         self._k_spin.setRange(1, 25)
-        self._k_spin.setValue(5)
+        self._k_spin.setValue(self._user_config.retrieval_k)
         v.addWidget(self._k_spin)
 
         self._agent_combo = QComboBox()
@@ -400,6 +489,18 @@ class MainWindow(QMainWindow):
         v.addWidget(data_hint)
 
         return w
+
+    def _open_settings(self) -> None:
+        dlg = _SettingsDialog(self, self._user_config)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._user_config = dlg.result_config()
+            save_user_config(self._settings, self._user_config)
+            self._k_spin.setValue(self._user_config.retrieval_k)
+            QMessageBox.information(
+                self,
+                "Settings saved",
+                "Model names apply on next restart. k and hybrid weight are saved.",
+            )
 
     def _build_input_row(self) -> QWidget:
         wrap = QFrame()
@@ -536,6 +637,7 @@ class MainWindow(QMainWindow):
 
         self._append_user(text)
         self._input.clear()
+        add_message(self._sess_conn, self._session_id, "user", text)
 
         thinking = QLabel("Thinking…")
         thinking.setObjectName("statsLabel")
@@ -588,10 +690,16 @@ class MainWindow(QMainWindow):
         if isinstance(result, RagAnswer):
             if result.empty_index:
                 self._append_assistant_result(result)
-            elif self._stream_bubble is not None and self._pending_sources:
-                self._stream_bubble.set_sources(self._pending_sources)
+                add_message(self._sess_conn, self._session_id, "assistant", result.answer)
+            elif self._stream_bubble is not None:
+                if self._pending_sources:
+                    self._stream_bubble.set_sources(self._pending_sources)
+                body = self._stream_bubble._text.toPlainText() if self._stream_bubble else ""
+                if body:
+                    add_message(self._sess_conn, self._session_id, "assistant", body)
             elif not self._stream_bubble:
                 self._append_assistant_result(result)
+                add_message(self._sess_conn, self._session_id, "assistant", result.answer)
         self._stream_bubble = None
         self._busy = False
         self._send_btn.setEnabled(True)
@@ -622,8 +730,10 @@ class MainWindow(QMainWindow):
             self._doc_list.clear()
             for d in rows:
                 tags = get_tags_for_doc(conn, d.id)
+                colls = get_collections_for_doc(conn, d.id)
                 tag_s = f" [{', '.join(tags)}]" if tags else ""
-                label = f"{(d.title or d.path)[:40]}{tag_s}"
+                coll_s = f" <{', '.join(colls)}>" if colls else ""
+                label = f"{(d.title or d.path)[:36]}{tag_s}{coll_s}"
                 item = QListWidgetItem(label)
                 item.setData(Qt.ItemDataRole.UserRole, d.path)
                 item.setToolTip(d.path)

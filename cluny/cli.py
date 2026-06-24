@@ -17,17 +17,25 @@ from cluny.extract import ExtractionError, list_ingestable_files
 from cluny.ingest import ingest_string
 from cluny.library_db import (
     DocumentRow,
+    add_doc_to_collection,
     add_tag_to_doc,
     connect,
+    create_collection,
+    doc_ids_in_collection,
     document_count,
+    duplicate_hash_groups,
+    get_collections_for_doc,
     get_tags_for_doc,
+    list_collections,
     list_documents,
     list_tags,
     resolve_document,
 )
 from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.query import rag_answer, rag_answer_stream, retrieve
+from cluny.sessions import add_message, connect as sessions_connect, get_or_create_last_session
 from cluny.store import get_collection
+from cluny.supervisor import run_chat
 from cluny.tasks_db import (
     TaskRow,
     complete_task as db_complete_task,
@@ -45,9 +53,13 @@ app = typer.Typer(help="Cluny — local second brain (Ollama + Chroma).")
 library_app = typer.Typer(help="Browse the SQLite document catalog.")
 tag_app = typer.Typer(help="Tag documents for organization.")
 tasks_app = typer.Typer(help="Manage tasks (separate from knowledge index).")
+collection_app = typer.Typer(help="Organize documents into collections.")
+calendar_app = typer.Typer(help="Read-only calendar from imported ICS files.")
 app.add_typer(library_app, name="library")
 app.add_typer(tag_app, name="tag")
 app.add_typer(tasks_app, name="tasks")
+app.add_typer(collection_app, name="collection")
+app.add_typer(calendar_app, name="calendar")
 
 
 def _echo_index_result(n: int, doc_id: str, unchanged: bool) -> None:
@@ -79,6 +91,11 @@ def add(
         "--pdf-ocr",
         help="Override CLUNY_PDF_OCR for PDFs: auto | always | never.",
     ),
+    replace: bool = typer.Option(
+        False,
+        "--replace",
+        help="Replace other catalog entries with the same content hash.",
+    ),
 ) -> None:
     """Register a file in the local library DB and index it for search."""
     settings = Settings.from_env()
@@ -96,6 +113,7 @@ def add(
             chunk_size=chunk_size,
             overlap=overlap,
             pdf_ocr=pdf_ocr,
+            replace=replace,
         )
     except FileNotFoundError as e:
         typer.echo(str(e), err=True)
@@ -386,10 +404,22 @@ def ingest_text(
 def search(
     query: str = typer.Argument(..., help="Retrieval query (no LLM)."),
     k: int = typer.Option(5, help="Number of chunks to retrieve."),
+    collection: str | None = typer.Option(
+        None, "--collection", "-c", help="Limit to a named collection."
+    ),
 ) -> None:
     """Hybrid search over indexed chunks (debug / retrieval-only)."""
+    settings = Settings.from_env()
+    doc_ids = None
+    if collection:
+        conn = connect(settings)
+        doc_ids = doc_ids_in_collection(conn, collection)
+        conn.close()
+        if not doc_ids:
+            typer.echo(f"No documents in collection {collection!r}.", err=True)
+            raise typer.Exit(code=1)
     try:
-        chunks = retrieve(query, k=k)
+        chunks = retrieve(query, k=k, settings=settings, doc_ids=doc_ids)
     except OllamaError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
@@ -417,25 +447,44 @@ def ask(
         "--no-stream",
         help="Wait for the full answer instead of streaming tokens.",
     ),
+    session: bool = typer.Option(
+        False,
+        "--session",
+        help="Append question/answer to the persistent chat session.",
+    ),
 ) -> None:
     """Ask using retrieved context (RAG)."""
+    settings = Settings.from_env()
+    sess_conn = None
+    session_id = None
+    if session:
+        sess_conn = sessions_connect(settings)
+        session_id = get_or_create_last_session(sess_conn)
+        add_message(sess_conn, session_id, "user", question)
     try:
         if no_stream:
-            result = rag_answer(question, k=k)
+            result = rag_answer(question, k=k, settings=settings)
             if result.empty_index:
                 typer.echo(result.answer, err=True)
                 raise typer.Exit(code=1)
             typer.echo(result.answer)
+            if sess_conn and session_id:
+                add_message(sess_conn, session_id, "assistant", result.answer)
             return
 
-        stream, sources, empty = rag_answer_stream(question, k=k)
+        stream, sources, empty = rag_answer_stream(question, k=k, settings=settings)
         if empty:
             msg = "".join(stream)
             typer.echo(msg, err=True)
             raise typer.Exit(code=1)
+        parts: list[str] = []
         for token in stream:
             typer.echo(token, nl=False)
+            parts.append(token)
         typer.echo()
+        answer = "".join(parts)
+        if sess_conn and session_id:
+            add_message(sess_conn, session_id, "assistant", answer)
         if sources:
             typer.echo("\nSources:")
             for s in sources:
@@ -443,6 +492,25 @@ def ask(
     except OllamaError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
+    finally:
+        if sess_conn:
+            sess_conn.close()
+
+
+@app.command()
+def chat(
+    question: str = typer.Argument(..., help="Question routed by intent classifier."),
+) -> None:
+    """Supervisor entrypoint — routes to ask, knowledge agent, tasks, or calendar."""
+    try:
+        result = run_chat(question)
+    except OllamaError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    typer.echo(f"[route: {result.route}]")
+    if result.tool_calls:
+        typer.echo("Tools: " + "; ".join(result.tool_calls))
+    typer.echo(result.answer)
 
 
 @app.command()
@@ -610,14 +678,23 @@ def _format_doc_row(d: DocumentRow, tags: list[str] | None = None) -> str:
 @library_app.command("list")
 def library_list(
     tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by tag name."),
+    collection: str | None = typer.Option(
+        None, "--collection", "-c", help="Filter by collection name."
+    ),
 ) -> None:
     """List documents registered in the SQLite catalog."""
     settings = Settings.from_env()
     conn = connect(settings)
-    rows = list_documents(conn, tag=tag)
+    rows = list_documents(conn, tag=tag, collection=collection)
     for d in rows:
         tags = get_tags_for_doc(conn, d.id)
-        typer.echo(_format_doc_row(d, tags))
+        colls = get_collections_for_doc(conn, d.id)
+        extra = ""
+        if tags:
+            extra += f"  tags=[{', '.join(tags)}]"
+        if colls:
+            extra += f"  collections=[{', '.join(colls)}]"
+        typer.echo(_format_doc_row(d) + extra)
     conn.close()
     if not rows:
         typer.echo("No documents in the library catalog yet. Use `cluny add`.")
@@ -822,6 +899,95 @@ def tasks_delete(identifier: str = typer.Argument(..., help="Task id or prefix."
     db_delete_task(conn, task.id)
     conn.close()
     typer.echo(f"Deleted task {task.id[:8]}…")
+
+
+@library_app.command("dedup")
+def library_dedup() -> None:
+    """Report documents that share the same content hash."""
+    settings = Settings.from_env()
+    conn = connect(settings)
+    groups = duplicate_hash_groups(conn)
+    conn.close()
+    if not groups:
+        typer.echo("No duplicate content hashes in the catalog.")
+        return
+    for h, docs in groups.items():
+        typer.echo(f"\nhash {h[:12]}… ({len(docs)} docs)")
+        for d in docs:
+            typer.echo(f"  {d.id[:8]}…  {d.title or d.path}")
+
+
+@collection_app.command("create")
+def collection_create(name: str = typer.Argument(...)) -> None:
+    """Create a collection."""
+    settings = Settings.from_env()
+    conn = connect(settings)
+    create_collection(conn, name)
+    conn.close()
+    typer.echo(f"Collection {name!r} ready.")
+
+
+@collection_app.command("add")
+def collection_add(
+    identifier: str = typer.Argument(..., help="Document id, prefix, or path."),
+    name: str = typer.Argument(..., help="Collection name."),
+) -> None:
+    """Add a document to a collection."""
+    settings = Settings.from_env()
+    conn = connect(settings)
+    doc = resolve_document(conn, identifier)
+    if doc is None:
+        conn.close()
+        typer.echo(f"No document matching: {identifier!r}", err=True)
+        raise typer.Exit(code=1)
+    add_doc_to_collection(conn, doc.id, name)
+    conn.close()
+    typer.echo(f"Added {doc.id[:8]}… to collection {name!r}")
+
+
+@collection_app.command("list")
+def collection_list() -> None:
+    """List all collections."""
+    settings = Settings.from_env()
+    conn = connect(settings)
+    names = list_collections(conn)
+    conn.close()
+    if not names:
+        typer.echo("No collections yet. Use `cluny collection create`.")
+        return
+    for n in names:
+        typer.echo(n)
+
+
+@calendar_app.command("import")
+def calendar_import(path: Path = typer.Argument(..., help="ICS file to import.")) -> None:
+    """Import calendar events from an ICS file (read-only)."""
+    from cluny.calendar_db import import_ics
+
+    settings = Settings.from_env()
+    try:
+        n = import_ics(path, settings)
+    except FileNotFoundError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    typer.echo(f"Imported {n} event(s) from {path}")
+
+
+@calendar_app.command("list")
+def calendar_list() -> None:
+    """List imported calendar events."""
+    from cluny.calendar_db import connect as cal_connect, list_upcoming
+
+    settings = Settings.from_env()
+    conn = cal_connect(settings)
+    events = list_upcoming(conn, limit=50)
+    conn.close()
+    if not events:
+        typer.echo("No events. Use `cluny calendar import`.")
+        return
+    for e in events:
+        when = e.start_at or "?"
+        typer.echo(f"{when}  {e.summary}")
 
 
 def main() -> None:
