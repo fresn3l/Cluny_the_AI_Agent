@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QFont, QKeyEvent, QTextOption
 from PySide6.QtWidgets import (
-    QCheckBox,
+    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -44,7 +44,7 @@ class WorkerSignals(QObject):
 class RagRunnable(QRunnable):
     """Runs RAG off the UI thread; streams tokens when not in agent mode."""
 
-    def __init__(self, question: str, k: int, *, agent_mode: bool) -> None:
+    def __init__(self, question: str, k: int, *, agent_mode: str) -> None:
         super().__init__()
         self._question = question
         self._k = k
@@ -53,8 +53,8 @@ class RagRunnable(QRunnable):
 
     def run(self) -> None:
         try:
-            if self._agent_mode:
-                result = run_agent(self._question)
+            if self._agent_mode in ("knowledge", "tasks", "all"):
+                result = run_agent(self._question, mode=self._agent_mode)  # type: ignore[arg-type]
                 body = result.answer
                 if result.tool_calls:
                     body = "Tools: " + "; ".join(result.tool_calls) + "\n\n" + body
@@ -388,9 +388,9 @@ class MainWindow(QMainWindow):
         self._k_spin.setValue(5)
         v.addWidget(self._k_spin)
 
-        self._agent_check = QCheckBox("Agent mode (tools)")
-        self._agent_check.setToolTip("Use search_brain / add_note tool loop instead of pure RAG")
-        v.addWidget(self._agent_check)
+        self._agent_combo = QComboBox()
+        self._agent_combo.addItems(["Ask (RAG)", "Knowledge agent", "Tasks agent", "All tools"])
+        v.addWidget(self._agent_combo)
 
         v.addStretch(1)
 
@@ -489,7 +489,7 @@ class MainWindow(QMainWindow):
         text = (
             "Ask anything grounded in your indexed notes. "
             "Drop files on the sidebar or use File → Add documents. "
-            "Enable Agent mode for tool-calling (search_brain, add_note)."
+            "Use the mode dropdown for RAG vs knowledge/tasks agent."
         )
         self._insert_bubble(_Bubble(role="assistant", body=text))
 
@@ -546,7 +546,15 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._scroll_to_bottom)
 
         k = self._k_spin.value()
-        agent_mode = self._agent_check.isChecked()
+        mode_idx = self._agent_combo.currentIndex()
+        if mode_idx == 0:
+            agent_mode = "ask"
+        elif mode_idx == 1:
+            agent_mode = "knowledge"
+        elif mode_idx == 2:
+            agent_mode = "tasks"
+        else:
+            agent_mode = "all"
         runnable = RagRunnable(text, k, agent_mode=agent_mode)
         runnable.signals.finished.connect(self._on_rag_finished)
         runnable.signals.error.connect(self._on_rag_error)

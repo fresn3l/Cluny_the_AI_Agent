@@ -179,6 +179,9 @@ cluny tag list
 cluny search "working memory"    # retrieval only (no LLM)
 cluny ask "…"                  # streams by default; use --no-stream for scripts
 cluny agent "…"                  # tool loop (search_brain, add_note)
+cluny agent --mode tasks "…"     # task tools only
+cluny tasks add "Buy milk" --due tomorrow
+cluny tasks list
 cluny eval                       # golden-question regression harness
 cluny export backup.zip          # snapshot CLUNY_DATA_DIR
 cluny import backup.zip          # restore from export

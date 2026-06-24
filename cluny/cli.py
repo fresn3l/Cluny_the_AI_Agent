@@ -28,14 +28,26 @@ from cluny.library_db import (
 from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.query import rag_answer, rag_answer_stream, retrieve
 from cluny.store import get_collection
+from cluny.tasks_db import (
+    TaskRow,
+    complete_task as db_complete_task,
+    connect as tasks_connect,
+    create_task as db_create_task,
+    delete_task as db_delete_task,
+    list_tasks as db_list_tasks,
+    resolve_task,
+    update_task as db_update_task,
+)
 from cluny.watcher import watch_directory
 
 app = typer.Typer(help="Cluny — local second brain (Ollama + Chroma).")
 
 library_app = typer.Typer(help="Browse the SQLite document catalog.")
 tag_app = typer.Typer(help="Tag documents for organization.")
+tasks_app = typer.Typer(help="Manage tasks (separate from knowledge index).")
 app.add_typer(library_app, name="library")
 app.add_typer(tag_app, name="tag")
+app.add_typer(tasks_app, name="tasks")
 
 
 def _echo_index_result(n: int, doc_id: str, unchanged: bool) -> None:
@@ -436,10 +448,19 @@ def ask(
 @app.command()
 def agent(
     question: str = typer.Argument(..., help="Question for the tool-calling agent."),
+    mode: str = typer.Option(
+        "knowledge",
+        "--mode",
+        "-m",
+        help="Tool namespace: knowledge | tasks | all",
+    ),
 ) -> None:
-    """Ask using the agent loop (search_brain / add_note tools)."""
+    """Ask using the agent loop (search_brain / add_note / task tools)."""
+    if mode not in ("knowledge", "tasks", "all"):
+        typer.echo("mode must be knowledge, tasks, or all", err=True)
+        raise typer.Exit(code=1)
     try:
-        result = run_agent(question)
+        result = run_agent(question, mode=mode)  # type: ignore[arg-type]
     except OllamaError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
@@ -689,6 +710,118 @@ def tag_list() -> None:
         return
     for t in tags:
         typer.echo(t)
+
+
+def _format_task(t: TaskRow) -> str:
+    due = f"  due={t.due_at}" if t.due_at else ""
+    return f"{t.id[:8]}…  [{t.status:4}]  {t.title}{due}"
+
+
+@tasks_app.command("add")
+def tasks_add(
+    title: str = typer.Argument(..., help="Task title."),
+    due: str | None = typer.Option(None, "--due", "-d", help="Due date (free text or ISO)."),
+    notes: str | None = typer.Option(None, "--notes", "-n"),
+    project: str | None = typer.Option(None, "--project", "-p"),
+) -> None:
+    """Add a new open task."""
+    settings = Settings.from_env()
+    conn = tasks_connect(settings)
+    task = db_create_task(conn, title, due_at=due, notes=notes, project_id=project)
+    conn.close()
+    typer.echo(f"Created task {task.id[:8]}…  {task.title}")
+
+
+@tasks_app.command("list")
+def tasks_list(
+    status: str | None = typer.Option(None, "--status", "-s", help="open or done"),
+) -> None:
+    """List tasks."""
+    settings = Settings.from_env()
+    conn = tasks_connect(settings)
+    rows = db_list_tasks(conn, status=status)
+    conn.close()
+    if not rows:
+        typer.echo("No tasks yet. Use `cluny tasks add`.")
+        return
+    for t in rows:
+        typer.echo(_format_task(t))
+
+
+@tasks_app.command("show")
+def tasks_show(identifier: str = typer.Argument(..., help="Task id or prefix.")) -> None:
+    """Show one task."""
+    settings = Settings.from_env()
+    conn = tasks_connect(settings)
+    task = resolve_task(conn, identifier)
+    conn.close()
+    if task is None:
+        typer.echo(f"No task matching: {identifier!r}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"id:         {task.id}")
+    typer.echo(f"title:      {task.title}")
+    typer.echo(f"status:     {task.status}")
+    typer.echo(f"due_at:     {task.due_at or '(none)'}")
+    typer.echo(f"created_at: {task.created_at}")
+    if task.notes:
+        typer.echo(f"notes:      {task.notes}")
+    if task.project_id:
+        typer.echo(f"project_id: {task.project_id}")
+
+
+@tasks_app.command("complete")
+def tasks_complete(identifier: str = typer.Argument(..., help="Task id or prefix.")) -> None:
+    """Mark a task done."""
+    settings = Settings.from_env()
+    conn = tasks_connect(settings)
+    task = resolve_task(conn, identifier)
+    if task is None:
+        conn.close()
+        typer.echo(f"No task matching: {identifier!r}", err=True)
+        raise typer.Exit(code=1)
+    done = db_complete_task(conn, task.id)
+    conn.close()
+    assert done is not None
+    typer.echo(f"Completed: {done.title}")
+
+
+@tasks_app.command("update")
+def tasks_update(
+    identifier: str = typer.Argument(..., help="Task id or prefix."),
+    title: str | None = typer.Option(None, "--title", "-t"),
+    due: str | None = typer.Option(None, "--due", "-d"),
+    notes: str | None = typer.Option(None, "--notes", "-n"),
+    status: str | None = typer.Option(None, "--status", "-s"),
+) -> None:
+    """Update a task."""
+    settings = Settings.from_env()
+    conn = tasks_connect(settings)
+    task = resolve_task(conn, identifier)
+    if task is None:
+        conn.close()
+        typer.echo(f"No task matching: {identifier!r}", err=True)
+        raise typer.Exit(code=1)
+    updated = db_update_task(
+        conn, task.id, title=title, due_at=due, notes=notes, status=status
+    )
+    conn.close()
+    assert updated is not None
+    typer.echo(_format_task(updated))
+
+
+@tasks_app.command("delete")
+def tasks_delete(identifier: str = typer.Argument(..., help="Task id or prefix.")) -> None:
+    """Delete a task."""
+    settings = Settings.from_env()
+    conn = tasks_connect(settings)
+    task = resolve_task(conn, identifier)
+    if task is None:
+        conn.close()
+        typer.echo(f"No task matching: {identifier!r}", err=True)
+        raise typer.Exit(code=1)
+    db_delete_task(conn, task.id)
+    conn.close()
+    typer.echo(f"Deleted task {task.id[:8]}…")
 
 
 def main() -> None:
