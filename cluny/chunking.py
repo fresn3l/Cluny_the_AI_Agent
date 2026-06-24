@@ -3,6 +3,29 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+
+from cluny.config import Settings
+
+
+@dataclass(frozen=True)
+class ChunkParams:
+    max_chars: int
+    overlap: int
+
+
+def chunk_params_for_kind(kind: str, settings: Settings) -> ChunkParams:
+    """Per-document-type chunk sizes from settings."""
+    k = kind.lower()
+    if k in ("pdf", "pdf-scanned"):
+        return ChunkParams(settings.chunk_pdf_size, settings.chunk_pdf_overlap)
+    if k in ("md", "markdown", "html", "url-html"):
+        return ChunkParams(settings.chunk_md_size, settings.chunk_md_overlap)
+    if k in ("journal", "entry", "txt", "text"):
+        if "journal" in k or k in ("journal", "entry"):
+            return ChunkParams(settings.chunk_journal_size, settings.chunk_journal_overlap)
+        return ChunkParams(settings.chunk_default_size, settings.chunk_default_overlap)
+    return ChunkParams(settings.chunk_default_size, settings.chunk_default_overlap)
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _PARAGRAPH = re.compile(r"\n\s*\n+")

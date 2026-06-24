@@ -7,6 +7,7 @@ import hashlib
 from chromadb.api.models.Collection import Collection
 
 from cluny.chunking import chunk_text
+from cluny.config import Settings
 from cluny.ollama_client import OllamaClient
 
 
@@ -25,11 +26,15 @@ def ingest_string(
     extra_metadata: dict[str, str] | None = None,
     *,
     return_chunks: bool = False,
+    settings: Settings | None = None,
 ) -> int | tuple[int, list[str]]:
-    """Chunk, embed, and upsert. Returns chunk count, or (count, chunk texts) if requested."""
+    """Chunk, embed in batches, and upsert."""
     parts = chunk_text(text, max_chars=max_chars, overlap=overlap)
     if not parts:
         return (0, []) if return_chunks else 0
+
+    settings = settings or Settings.from_env()
+    batch_size = settings.embed_batch_size
 
     base = _source_id(text, source_label)
     ids: list[str] = []
@@ -45,7 +50,10 @@ def ingest_string(
             for key, val in extra_metadata.items():
                 meta[key] = val
         metadatas.append(meta)
-        embeddings.append(ollama.embed(part))
+
+    for start in range(0, len(parts), batch_size):
+        batch = parts[start : start + batch_size]
+        embeddings.extend(ollama.embed_batch(batch))
 
     collection.upsert(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
     if return_chunks:

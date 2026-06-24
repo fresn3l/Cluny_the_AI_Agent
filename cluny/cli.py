@@ -9,10 +9,10 @@ from pathlib import Path
 import typer
 
 from cluny.agent import run_agent
-from cluny.backup import export_data
+from cluny.backup import export_data, restore_data
 from cluny.config import Settings, load_dotenv_if_present
 from cluny.documents import add_file, add_url, delete_document
-from cluny.eval import default_golden_path, load_cases, run_eval, write_report
+from cluny.eval import default_golden_path, default_report_path, load_cases, run_eval, write_report
 from cluny.extract import ExtractionError, list_ingestable_files
 from cluny.ingest import ingest_string
 from cluny.library_db import (
@@ -469,6 +469,11 @@ def eval_run(
         "--retrieval-only",
         help="Skip LLM answers; check retrieval hits only.",
     ),
+    fts_only: bool = typer.Option(
+        False,
+        "--fts-only",
+        help="FTS retrieval only (no Ollama embeddings; for CI).",
+    ),
 ) -> None:
     """Run golden questions and report pass/fail (RAG regression harness)."""
     path = golden or default_golden_path()
@@ -482,20 +487,26 @@ def eval_run(
         raise typer.Exit(code=1)
 
     try:
-        report = run_eval(cases, skip_llm=retrieval_only)
+        report = run_eval(cases, skip_llm=retrieval_only, fts_only=fts_only)
     except OllamaError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
 
-    typer.echo(f"Eval: {report.passed}/{report.total} passed ({report.run_at})")
+    typer.echo(
+        f"Eval: {report.passed}/{report.total} passed | "
+        f"retrieval_hit={report.retrieval_hit_rate:.0%} | "
+        f"avg_latency={report.avg_latency_ms:.0f}ms ({report.run_at})"
+    )
+    if report.refusal_rate is not None:
+        typer.echo(f"  refusal_rate={report.refusal_rate:.0%}")
     for case in report.cases:
         status = "PASS" if case.passed else "FAIL"
         q = case.question if len(case.question) <= 60 else case.question[:57] + "…"
-        typer.echo(f"  [{status}] {q}")
+        typer.echo(f"  [{status}] {q} ({case.latency_ms:.0f}ms)")
 
-    if output:
-        write_report(report, output)
-        typer.echo(f"Report written to {output}")
+    out_path = output or default_report_path()
+    write_report(report, out_path)
+    typer.echo(f"Report written to {out_path}")
 
     if report.passed < report.total:
         raise typer.Exit(code=1)
@@ -518,6 +529,25 @@ def export(
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
     typer.echo(f"Exported to {path}")
+
+
+@app.command()
+def import_data(
+    archive: Path = typer.Argument(..., help="Cluny export .zip to restore."),
+    merge: bool = typer.Option(
+        False,
+        "--merge",
+        help="Merge into existing data dir instead of replacing chroma/sqlite.",
+    ),
+) -> None:
+    """Restore catalog and vector index from a Cluny export archive."""
+    settings = Settings.from_env()
+    try:
+        restore_data(archive, settings, merge=merge)
+    except (FileNotFoundError, OSError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    typer.echo(f"Restored from {archive} into {settings.data_dir}")
 
 
 @app.command()

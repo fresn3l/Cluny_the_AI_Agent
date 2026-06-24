@@ -181,6 +181,7 @@ cluny ask "…"                  # streams by default; use --no-stream for scrip
 cluny agent "…"                  # tool loop (search_brain, add_note)
 cluny eval                       # golden-question regression harness
 cluny export backup.zip          # snapshot CLUNY_DATA_DIR
+cluny import backup.zip          # restore from export
 ```
 
 ## Privacy

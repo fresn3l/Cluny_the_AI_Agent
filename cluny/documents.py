@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 from chromadb.api.models.Collection import Collection
 
+from cluny.chunking import chunk_params_for_kind
 from cluny.config import Settings
 from cluny.extract import ExtractionError, extract_text
 from cluny.ingest import ingest_string
@@ -86,6 +87,19 @@ def delete_document(
     return doc_id
 
 
+def _effective_chunk_params(
+    kind: str,
+    settings: Settings,
+    chunk_size: int,
+    overlap: int,
+) -> tuple[int, int]:
+    """Use per-kind defaults when CLI left values at generic defaults."""
+    params = chunk_params_for_kind(kind, settings)
+    if chunk_size == 1200 and overlap == 200:
+        return params.max_chars, params.overlap
+    return chunk_size, overlap
+
+
 def add_file(
     settings: Settings,
     collection: Collection,
@@ -146,15 +160,17 @@ def add_file(
     if kind == "pdf-scanned":
         extra["ocr_used"] = "true"
 
+    eff_size, eff_overlap = _effective_chunk_params(kind, settings, chunk_size, overlap)
     n, parts = ingest_string(
         collection,
         ollama,
         text,
         source_label=source_label,
-        max_chars=chunk_size,
-        overlap=overlap,
+        max_chars=eff_size,
+        overlap=eff_overlap,
         extra_metadata=_meta_str(extra),
         return_chunks=True,
+        settings=settings,
     )
 
     replace_chunks(conn, doc_id, parts)
@@ -228,15 +244,17 @@ def add_url(
         }
     )
 
+    eff_size, eff_overlap = _effective_chunk_params(fc.kind, settings, chunk_size, overlap)
     n, parts = ingest_string(
         collection,
         ollama,
         text,
         source_label=source_label,
-        max_chars=chunk_size,
-        overlap=overlap,
+        max_chars=eff_size,
+        overlap=eff_overlap,
         extra_metadata=extra,
         return_chunks=True,
+        settings=settings,
     )
 
     replace_chunks(conn, doc_id, parts)

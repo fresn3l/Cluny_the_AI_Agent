@@ -44,6 +44,16 @@ def settings(tmp_path: Path) -> Settings:
         retrieval_k=10,
         ollama_timeout_sec=30.0,
         ollama_retries=0,
+        embed_batch_size=8,
+        rerank_mode="off",
+        chunk_pdf_size=1500,
+        chunk_pdf_overlap=250,
+        chunk_md_size=1200,
+        chunk_md_overlap=200,
+        chunk_journal_size=800,
+        chunk_journal_overlap=100,
+        chunk_default_size=1200,
+        chunk_default_overlap=200,
     )
 
 
@@ -67,16 +77,16 @@ def test_content_hash_skip(settings: Settings, tmp_path: Path):
 
     mock_collection = MagicMock()
     mock_ollama = MagicMock()
-    mock_ollama.embed.return_value = [0.1, 0.2, 0.3]
+    mock_ollama.embed_batch.return_value = [[0.1, 0.2, 0.3]]
 
     result1 = add_file(settings, mock_collection, mock_ollama, f)
     assert result1.unchanged is False
-    assert mock_ollama.embed.call_count >= 1
-    embed_calls_after_first = mock_ollama.embed.call_count
+    assert mock_ollama.embed_batch.call_count >= 1
+    embed_calls_after_first = mock_ollama.embed_batch.call_count
 
     result2 = add_file(settings, mock_collection, mock_ollama, f)
     assert result2.unchanged is True
-    assert mock_ollama.embed.call_count == embed_calls_after_first
+    assert mock_ollama.embed_batch.call_count == embed_calls_after_first
 
 
 def test_library_delete(settings: Settings, tmp_path: Path):

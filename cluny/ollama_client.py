@@ -25,12 +25,30 @@ class OllamaClient:
         self._retries = settings.ollama_retries
 
     def embed(self, text: str) -> list[float]:
-        payload: dict[str, Any] = {"model": self._embed_model, "prompt": text}
-        data = self._post_json("/api/embeddings", payload)
-        emb = data.get("embedding")
-        if not isinstance(emb, list):
-            raise OllamaError(f"unexpected embeddings response: {data!r}")
-        return [float(x) for x in emb]
+        batch = self.embed_batch([text])
+        return batch[0]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed multiple texts; uses Ollama /api/embed when available."""
+        if not texts:
+            return []
+        payload: dict[str, Any] = {"model": self._embed_model, "input": texts}
+        try:
+            data = self._post_json("/api/embed", payload)
+            embeddings = data.get("embeddings")
+            if isinstance(embeddings, list) and len(embeddings) == len(texts):
+                return [[float(x) for x in e] for e in embeddings]
+        except OllamaError:
+            pass
+        # Fallback for older Ollama: single /api/embeddings per text
+        out: list[list[float]] = []
+        for text in texts:
+            data = self._post_json("/api/embeddings", {"model": self._embed_model, "prompt": text})
+            emb = data.get("embedding")
+            if not isinstance(emb, list):
+                raise OllamaError(f"unexpected embeddings response: {data!r}")
+            out.append([float(x) for x in emb])
+        return out
 
     def chat(self, system: str, user: str) -> str:
         messages = [
