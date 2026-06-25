@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from cluny.config import Settings
+from cluny.dates import parse_due
 from cluny.tasks_db import (
     complete_task,
     connect,
@@ -20,39 +19,6 @@ from cluny.tools.registry import ToolRegistry
 from cluny.tools.tasks import build_task_tools
 
 
-@pytest.fixture
-def settings(tmp_path: Path) -> Settings:
-    return Settings(
-        ollama_base_url="http://127.0.0.1:11434",
-        chat_model="test",
-        embed_model="test",
-        data_dir=tmp_path / ".cluny",
-        catalog_dir_name="library",
-        library_sqlite_name="library.sqlite",
-        pdf_ocr_mode="never",
-        url_mode="open",
-        url_allow_hosts=frozenset(),
-        url_block_hosts=frozenset(),
-        url_max_bytes=1_000_000,
-        url_timeout_sec=30.0,
-        url_user_agent="test",
-        hybrid_vector_weight=0.5,
-        retrieval_k=10,
-        ollama_timeout_sec=30.0,
-        ollama_retries=0,
-        embed_batch_size=8,
-        rerank_mode="off",
-        chunk_pdf_size=1500,
-        chunk_pdf_overlap=250,
-        chunk_md_size=1200,
-        chunk_md_overlap=200,
-        chunk_journal_size=800,
-        chunk_journal_overlap=100,
-        chunk_default_size=1200,
-        chunk_default_overlap=200,
-    )
-
-
 def test_create_and_list_tasks(settings: Settings):
     conn = connect(settings)
     create_task(conn, "Buy milk", due_at="tomorrow")
@@ -61,6 +27,31 @@ def test_create_and_list_tasks(settings: Settings):
     assert len(rows) == 1
     assert rows[0].title == "Buy milk"
     assert rows[0].status == "open"
+    assert rows[0].due_at is not None
+    assert "T" in rows[0].due_at
+
+
+def test_parse_due_tomorrow():
+    iso = parse_due("tomorrow")
+    assert iso is not None
+    assert iso.endswith("Z")
+
+
+def test_list_tasks_due_week(settings: Settings):
+    conn = connect(settings)
+    create_task(conn, "Soon", due_at="+1d")
+    create_task(conn, "Later", due_at="+30d")
+    week = list_tasks(conn, due_week=True)
+    conn.close()
+    assert len(week) == 1
+    assert week[0].title == "Soon"
+
+
+def test_task_recurrence(settings: Settings):
+    conn = connect(settings)
+    t = create_task(conn, "Standup", recurrence="weekly")
+    conn.close()
+    assert t.recurrence == "weekly"
 
 
 def test_complete_task(settings: Settings):

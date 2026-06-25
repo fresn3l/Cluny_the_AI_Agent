@@ -9,11 +9,12 @@ from typing import Literal
 from cluny.config import Settings
 from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.query import SYSTEM_PROMPT
+from cluny.tools.calendar import build_calendar_tools
 from cluny.tools.knowledge import build_knowledge_tools
 from cluny.tools.registry import Tool, ToolRegistry
 from cluny.tools.tasks import build_task_tools
 
-AgentMode = Literal["knowledge", "tasks", "all"]
+AgentMode = Literal["knowledge", "tasks", "all", "planner"]
 
 KNOWLEDGE_AGENT_SYSTEM = (
     SYSTEM_PROMPT
@@ -32,13 +33,28 @@ TASKS_AGENT_SYSTEM = (
 
 ALL_AGENT_SYSTEM = (
     SYSTEM_PROMPT
-    + " You have knowledge tools (search_brain, add_note) and task tools "
-    "(create_task, list_tasks, update_task, complete_task). Use knowledge tools for "
-    "indexed notes; use task tools for to-dos. Never mix them unnecessarily. "
+    + " You have knowledge tools (search_brain, add_note), task tools "
+    "(create_task, list_tasks, update_task, complete_task), and calendar tools "
+    "(list_events, events_on_date). Use the right tool for the request. "
     "Call one tool at a time."
 )
 
+PLANNER_AGENT_SYSTEM = (
+    SYSTEM_PROMPT
+    + " You are a planner. The user wants a compound outcome. First use search_brain "
+    "to gather facts from indexed notes when needed, then use task tools to create or "
+    "update tasks. You may also use calendar tools for scheduling context. "
+    "Call one tool at a time, up to several steps, then give a final summary."
+)
+
 MAX_TURNS = 8
+PLANNER_MAX_TURNS = 12
+
+_TASK_TOOL_NAMES = frozenset(
+    {"create_task", "list_tasks", "update_task", "complete_task"}
+)
+_KNOWLEDGE_TOOL_NAMES = frozenset({"search_brain", "add_note"})
+_CALENDAR_TOOL_NAMES = frozenset({"list_events", "events_on_date"})
 
 
 @dataclass
@@ -49,10 +65,12 @@ class AgentResult:
 
 def _build_registry(settings: Settings, mode: AgentMode) -> ToolRegistry:
     tools: list[Tool] = []
-    if mode in ("knowledge", "all"):
+    if mode in ("knowledge", "all", "planner"):
         tools.extend(build_knowledge_tools(settings))
-    if mode in ("tasks", "all"):
+    if mode in ("tasks", "all", "planner"):
         tools.extend(build_task_tools(settings))
+    if mode in ("all", "planner"):
+        tools.extend(build_calendar_tools(settings))
     return ToolRegistry(tools)
 
 
@@ -61,19 +79,34 @@ def _system_for_mode(mode: AgentMode) -> str:
         return TASKS_AGENT_SYSTEM
     if mode == "all":
         return ALL_AGENT_SYSTEM
+    if mode == "planner":
+        return PLANNER_AGENT_SYSTEM
     return KNOWLEDGE_AGENT_SYSTEM
+
+
+def _max_turns(mode: AgentMode) -> int:
+    return PLANNER_MAX_TURNS if mode == "planner" else MAX_TURNS
+
+
+def _tool_allowed(mode: AgentMode, name: str) -> bool:
+    if mode == "knowledge":
+        return name in _KNOWLEDGE_TOOL_NAMES
+    if mode == "tasks":
+        return name in _TASK_TOOL_NAMES
+    return True
 
 
 def run_agent(
     question: str,
     *,
     settings: Settings | None = None,
-    max_turns: int = MAX_TURNS,
+    max_turns: int | None = None,
     mode: AgentMode = "knowledge",
 ) -> AgentResult:
-    settings = settings or Settings.from_env()
+    settings = settings or Settings.load()
     ollama = OllamaClient(settings)
     registry = _build_registry(settings, mode)
+    turns = max_turns if max_turns is not None else _max_turns(mode)
 
     messages: list[dict] = [
         {"role": "system", "content": _system_for_mode(mode)},
@@ -81,7 +114,7 @@ def run_agent(
     ]
     tool_trace: list[str] = []
 
-    for _ in range(max_turns):
+    for _ in range(turns):
         try:
             data = ollama.chat_with_tools(messages, registry.schemas())
         except OllamaError:
@@ -108,15 +141,8 @@ def run_agent(
             else:
                 args = raw_args if isinstance(raw_args, dict) else {}
 
-            if mode == "knowledge" and name in (
-                "create_task",
-                "list_tasks",
-                "update_task",
-                "complete_task",
-            ):
-                result = json.dumps({"error": f"Tool {name} not available in knowledge mode"})
-            elif mode == "tasks" and name in ("search_brain", "add_note"):
-                result = json.dumps({"error": f"Tool {name} not available in tasks mode"})
+            if not _tool_allowed(mode, name):
+                result = json.dumps({"error": f"Tool {name} not available in {mode} mode"})
             else:
                 result = registry.execute(name, args)
 

@@ -127,15 +127,29 @@ def list_upcoming(conn: sqlite3.Connection, *, limit: int = 20) -> list[EventRow
         "SELECT * FROM events ORDER BY COALESCE(start_at, imported_at) ASC LIMIT ?",
         (limit,),
     )
-    return [
-        EventRow(
-            id=str(r["id"]),
-            uid=str(r["uid"]) if r["uid"] else None,
-            summary=str(r["summary"]),
-            start_at=str(r["start_at"]) if r["start_at"] else None,
-            end_at=str(r["end_at"]) if r["end_at"] else None,
-            location=str(r["location"]) if r["location"] else None,
-            source_file=str(r["source_file"]) if r["source_file"] else None,
-        )
-        for r in cur.fetchall()
-    ]
+    return [_row_from_sql(r) for r in cur.fetchall()]
+
+
+def _row_from_sql(r: sqlite3.Row) -> EventRow:
+    return EventRow(
+        id=str(r["id"]),
+        uid=str(r["uid"]) if r["uid"] else None,
+        summary=str(r["summary"]),
+        start_at=str(r["start_at"]) if r["start_at"] else None,
+        end_at=str(r["end_at"]) if r["end_at"] else None,
+        location=str(r["location"]) if r["location"] else None,
+        source_file=str(r["source_file"]) if r["source_file"] else None,
+    )
+
+
+def events_on_date(conn: sqlite3.Connection, date_str: str) -> list[EventRow]:
+    """Match events whose start_at contains the date prefix (ICS DTSTART formats)."""
+    from cluny.dates import parse_due
+
+    iso = parse_due(date_str) or date_str
+    prefix = iso[:10] if len(iso) >= 10 else date_str[:10]
+    cur = conn.execute(
+        "SELECT * FROM events WHERE start_at LIKE ? ORDER BY start_at ASC",
+        (f"{prefix}%",),
+    )
+    return [_row_from_sql(r) for r in cur.fetchall()]

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from cluny.config import Settings
+from cluny.dates import parse_due
 from cluny.tasks_db import (
     complete_task,
     connect,
@@ -19,7 +20,7 @@ from cluny.tools.registry import Tool
 def _parse_due(raw: Any) -> str | None:
     if raw is None or raw == "":
         return None
-    return str(raw).strip()
+    return parse_due(str(raw))
 
 
 def _create_task(args: dict[str, Any], settings: Settings) -> dict[str, Any]:
@@ -33,15 +34,24 @@ def _create_task(args: dict[str, Any], settings: Settings) -> dict[str, Any]:
         due_at=_parse_due(args.get("due_at")),
         notes=str(args.get("notes", "")).strip() or None,
         project_id=str(args.get("project_id", "")).strip() or None,
+        recurrence=str(args.get("recurrence", "")).strip() or None,
     )
     conn.close()
-    return {"id": task.id, "title": task.title, "status": task.status, "due_at": task.due_at}
+    return {
+        "id": task.id,
+        "title": task.title,
+        "status": task.status,
+        "due_at": task.due_at,
+        "recurrence": task.recurrence,
+    }
 
 
 def _list_tasks(args: dict[str, Any], settings: Settings) -> dict[str, Any]:
     conn = connect(settings)
     status = str(args.get("status", "")).strip() or None
-    rows = list_tasks(conn, status=status)
+    project = str(args.get("project_id", "")).strip() or None
+    due_week = bool(args.get("due_week", False))
+    rows = list_tasks(conn, status=status, project_id=project, due_week=due_week)
     conn.close()
     return {
         "tasks": [
@@ -52,6 +62,7 @@ def _list_tasks(args: dict[str, Any], settings: Settings) -> dict[str, Any]:
                 "due_at": t.due_at,
                 "notes": t.notes,
                 "project_id": t.project_id,
+                "recurrence": t.recurrence,
             }
             for t in rows
         ]
@@ -122,6 +133,8 @@ def build_task_tools(settings: Settings) -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "status": {"type": "string", "enum": ["open", "done"]},
+                    "project_id": {"type": "string"},
+                    "due_week": {"type": "boolean", "description": "Only tasks due in next 7 days"},
                 },
             },
             handler=lambda args: _list_tasks(args, settings),

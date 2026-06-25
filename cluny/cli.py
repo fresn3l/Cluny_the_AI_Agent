@@ -9,9 +9,9 @@ from pathlib import Path
 import typer
 
 from cluny.agent import run_agent
-from cluny.backup import export_data, restore_data
+from cluny.backup import export_data, restore_data, run_scheduled_backup
 from cluny.config import Settings, load_dotenv_if_present
-from cluny.documents import add_file, add_url, delete_document
+from cluny.documents import add_file, add_inline_text, add_url, delete_document
 from cluny.eval import default_golden_path, default_report_path, load_cases, run_eval, write_report
 from cluny.extract import ExtractionError, list_ingestable_files
 from cluny.ingest import ingest_string
@@ -55,11 +55,13 @@ tag_app = typer.Typer(help="Tag documents for organization.")
 tasks_app = typer.Typer(help="Manage tasks (separate from knowledge index).")
 collection_app = typer.Typer(help="Organize documents into collections.")
 calendar_app = typer.Typer(help="Read-only calendar from imported ICS files.")
+backup_app = typer.Typer(help="Backup and restore data snapshots.")
 app.add_typer(library_app, name="library")
 app.add_typer(tag_app, name="tag")
 app.add_typer(tasks_app, name="tasks")
 app.add_typer(collection_app, name="collection")
 app.add_typer(calendar_app, name="calendar")
+app.add_typer(backup_app, name="backup")
 
 
 def _echo_index_result(n: int, doc_id: str, unchanged: bool) -> None:
@@ -374,15 +376,35 @@ def ingest_text(
         "-s",
         help="Short label stored as metadata (e.g. book title).",
     ),
+    catalog: bool = typer.Option(
+        False,
+        "--catalog",
+        help="Register in SQLite catalog as kind=inline (not orphan chunks).",
+    ),
+    title: str | None = typer.Option(None, "--title", "-t", help="Catalog title when --catalog."),
     chunk_size: int = typer.Option(1200),
     overlap: int = typer.Option(200),
 ) -> None:
-    """Index a string (paste, shell heredoc, etc.). Not stored in the SQLite catalog."""
-    settings = Settings.from_env()
+    """Index a string (paste, shell heredoc, etc.)."""
+    settings = Settings.load()
     collection = get_collection(settings)
     ollama = OllamaClient(settings)
 
     try:
+        if catalog:
+            result = add_inline_text(
+                settings,
+                collection,
+                ollama,
+                text,
+                source_label=source,
+                title=title,
+                chunk_size=chunk_size,
+                overlap=overlap,
+            )
+            _echo_index_result(result.chunk_count, result.doc_id, result.unchanged)
+            return
+
         n = ingest_string(
             collection,
             ollama,
@@ -454,7 +476,7 @@ def ask(
     ),
 ) -> None:
     """Ask using retrieved context (RAG)."""
-    settings = Settings.from_env()
+    settings = Settings.load()
     sess_conn = None
     session_id = None
     if session:
@@ -503,7 +525,7 @@ def chat(
 ) -> None:
     """Supervisor entrypoint — routes to ask, knowledge agent, tasks, or calendar."""
     try:
-        result = run_chat(question)
+        result = run_chat(question, settings=Settings.load())
     except OllamaError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
@@ -520,15 +542,15 @@ def agent(
         "knowledge",
         "--mode",
         "-m",
-        help="Tool namespace: knowledge | tasks | all",
+        help="Tool namespace: knowledge | tasks | all | planner",
     ),
 ) -> None:
     """Ask using the agent loop (search_brain / add_note / task tools)."""
-    if mode not in ("knowledge", "tasks", "all"):
-        typer.echo("mode must be knowledge, tasks, or all", err=True)
+    if mode not in ("knowledge", "tasks", "all", "planner"):
+        typer.echo("mode must be knowledge, tasks, all, or planner", err=True)
         raise typer.Exit(code=1)
     try:
-        result = run_agent(question, mode=mode)  # type: ignore[arg-type]
+        result = run_agent(question, mode=mode, settings=Settings.load())  # type: ignore[arg-type]
     except OllamaError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
@@ -609,15 +631,34 @@ def export(
         "--no-files",
         help="Omit managed file copies from the archive.",
     ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="AES-encrypt the zip (requires pyzipper).",
+    ),
 ) -> None:
     """Export catalog, vectors, and optional managed copies to a zip archive."""
-    settings = Settings.from_env()
+    settings = Settings.load()
     try:
-        path = export_data(out, settings, include_files=not no_files)
-    except OSError as e:
+        path = export_data(out, settings, include_files=not no_files, password=password)
+    except (OSError, RuntimeError) as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
     typer.echo(f"Exported to {path}")
+
+
+@backup_app.command("run")
+def backup_run(
+    no_files: bool = typer.Option(False, "--no-files", help="Omit managed file copies."),
+) -> None:
+    """Write a timestamped backup zip to CLUNY_BACKUP_DIR."""
+    settings = Settings.load()
+    try:
+        path = run_scheduled_backup(settings, include_files=not no_files)
+    except OSError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    typer.echo(f"Backup written to {path}")
 
 
 @app.command()
@@ -628,12 +669,17 @@ def import_data(
         "--merge",
         help="Merge into existing data dir instead of replacing chroma/sqlite.",
     ),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        help="Password for AES-encrypted archives.",
+    ),
 ) -> None:
     """Restore catalog and vector index from a Cluny export archive."""
-    settings = Settings.from_env()
+    settings = Settings.load()
     try:
-        restore_data(archive, settings, merge=merge)
-    except (FileNotFoundError, OSError) as e:
+        restore_data(archive, settings, merge=merge, password=password)
+    except (FileNotFoundError, OSError, RuntimeError) as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
     typer.echo(f"Restored from {archive} into {settings.data_dir}")
@@ -791,20 +837,37 @@ def tag_list() -> None:
 
 def _format_task(t: TaskRow) -> str:
     due = f"  due={t.due_at}" if t.due_at else ""
-    return f"{t.id[:8]}…  [{t.status:4}]  {t.title}{due}"
+    rec = f"  every={t.recurrence}" if t.recurrence else ""
+    return f"{t.id[:8]}…  [{t.status:4}]  {t.title}{due}{rec}"
 
 
 @tasks_app.command("add")
 def tasks_add(
     title: str = typer.Argument(..., help="Task title."),
-    due: str | None = typer.Option(None, "--due", "-d", help="Due date (free text or ISO)."),
+    due: str | None = typer.Option(None, "--due", "-d", help="Due date (tomorrow, +3d, ISO)."),
     notes: str | None = typer.Option(None, "--notes", "-n"),
     project: str | None = typer.Option(None, "--project", "-p"),
+    every: str | None = typer.Option(
+        None,
+        "--every",
+        "-e",
+        help="Recurrence: daily, weekly, or monthly.",
+    ),
 ) -> None:
     """Add a new open task."""
-    settings = Settings.from_env()
+    if every and every.lower() not in ("daily", "weekly", "monthly"):
+        typer.echo("--every must be daily, weekly, or monthly", err=True)
+        raise typer.Exit(code=1)
+    settings = Settings.load()
     conn = tasks_connect(settings)
-    task = db_create_task(conn, title, due_at=due, notes=notes, project_id=project)
+    task = db_create_task(
+        conn,
+        title,
+        due_at=due,
+        notes=notes,
+        project_id=project,
+        recurrence=every.lower() if every else None,
+    )
     conn.close()
     typer.echo(f"Created task {task.id[:8]}…  {task.title}")
 
@@ -812,11 +875,20 @@ def tasks_add(
 @tasks_app.command("list")
 def tasks_list(
     status: str | None = typer.Option(None, "--status", "-s", help="open or done"),
+    project: str | None = typer.Option(None, "--project", "-p"),
+    due_before: str | None = typer.Option(None, "--due-before", help="Due on or before date."),
+    due_week: bool = typer.Option(False, "--due-week", help="Due within the next 7 days."),
 ) -> None:
     """List tasks."""
-    settings = Settings.from_env()
+    settings = Settings.load()
     conn = tasks_connect(settings)
-    rows = db_list_tasks(conn, status=status)
+    rows = db_list_tasks(
+        conn,
+        status=status,
+        project_id=project,
+        due_before=due_before,
+        due_week=due_week,
+    )
     conn.close()
     if not rows:
         typer.echo("No tasks yet. Use `cluny tasks add`.")
@@ -844,6 +916,8 @@ def tasks_show(identifier: str = typer.Argument(..., help="Task id or prefix."))
         typer.echo(f"notes:      {task.notes}")
     if task.project_id:
         typer.echo(f"project_id: {task.project_id}")
+    if task.recurrence:
+        typer.echo(f"recurrence: {task.recurrence}")
 
 
 @tasks_app.command("complete")
@@ -988,6 +1062,22 @@ def calendar_list() -> None:
     for e in events:
         when = e.start_at or "?"
         typer.echo(f"{when}  {e.summary}")
+
+
+@app.command()
+def serve() -> None:
+    """Start the local HTTP API (FastAPI on CLUNY_API_BIND:CLUNY_API_PORT)."""
+    try:
+        from cluny.api import serve as api_serve
+    except ImportError as e:
+        typer.echo(
+            "FastAPI is required. Install with: pip install -e '.[api]'",
+            err=True,
+        )
+        raise typer.Exit(code=1) from e
+    settings = Settings.load()
+    typer.echo(f"Serving Cluny API at http://{settings.api_bind_host}:{settings.api_port}")
+    api_serve(settings)
 
 
 def main() -> None:

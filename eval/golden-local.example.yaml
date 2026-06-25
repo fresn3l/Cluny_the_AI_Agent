@@ -1,0 +1,12 @@
+# Copy to eval/golden-local.yaml and fill with questions about YOUR indexed library.
+# golden-local.yaml is gitignored — this file is the template.
+
+- question: "What did I write about working memory?"
+  expect_sources: ["working"]
+  k: 5
+  skip_when_empty: true
+
+- question: "Summarize my notes on the Smith project."
+  expect_sources: ["smith"]
+  k: 5
+  skip_when_empty: true

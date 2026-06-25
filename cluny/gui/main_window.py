@@ -45,6 +45,7 @@ from cluny.ollama_client import OllamaError
 from cluny.query import RagAnswer, RagSource, rag_answer_stream
 from cluny.sessions import add_message, connect as sessions_connect, get_or_create_last_session, list_messages
 from cluny.store import get_collection
+from cluny.supervisor import run_chat
 from cluny.user_config import UserConfig, load_user_config, save_user_config
 
 
@@ -67,8 +68,24 @@ class RagRunnable(QRunnable):
 
     def run(self) -> None:
         try:
-            if self._agent_mode in ("knowledge", "tasks", "all"):
-                result = run_agent(self._question, mode=self._agent_mode)  # type: ignore[arg-type]
+            settings = Settings.load()
+            if self._agent_mode == "chat":
+                result = run_chat(self._question, settings=settings)
+                body = result.answer
+                if result.tool_calls:
+                    body = "Tools: " + "; ".join(result.tool_calls) + "\n\n" + body
+                body = f"[route: {result.route}]\n\n{body}"
+                self.signals.finished.emit(
+                    RagAnswer(answer=body, sources=(), empty_index=False)
+                )
+                return
+
+            if self._agent_mode in ("knowledge", "tasks", "all", "planner"):
+                result = run_agent(
+                    self._question,
+                    mode=self._agent_mode,  # type: ignore[arg-type]
+                    settings=settings,
+                )
                 body = result.answer
                 if result.tool_calls:
                     body = "Tools: " + "; ".join(result.tool_calls) + "\n\n" + body
@@ -77,7 +94,7 @@ class RagRunnable(QRunnable):
                 )
                 return
 
-            stream, sources, empty = rag_answer_stream(self._question, k=self._k)
+            stream, sources, empty = rag_answer_stream(self._question, k=self._k, settings=settings)
             if empty:
                 self.signals.finished.emit(
                     RagAnswer(
@@ -105,7 +122,7 @@ class IngestRunnable(QRunnable):
         self.signals = WorkerSignals()
 
     def run(self) -> None:
-        settings = Settings.from_env()
+        settings = Settings.load()
         collection = get_collection(settings)
         from cluny.ollama_client import OllamaClient
 
@@ -342,7 +359,7 @@ class MainWindow(QMainWindow):
         self._thread_pool = QThreadPool.globalInstance()
         self._stream_bubble: _Bubble | None = None
         self._pending_sources: tuple[RagSource, ...] = ()
-        self._settings = Settings.from_env()
+        self._settings = Settings.load()
         self._user_config = load_user_config(self._settings)
         self._sess_conn = sessions_connect(self._settings)
         self._session_id = get_or_create_last_session(self._sess_conn)
@@ -390,7 +407,9 @@ class MainWindow(QMainWindow):
         self._refresh_stats()
         self._refresh_library()
         self._k_spin.setValue(self._user_config.retrieval_k)
-        idx = {"ask": 0, "knowledge": 1, "tasks": 2, "all": 3}.get(self._user_config.agent_mode, 0)
+        idx = {"ask": 0, "chat": 1, "knowledge": 2, "tasks": 3, "all": 4, "planner": 5}.get(
+            self._user_config.agent_mode, 0
+        )
         self._agent_combo.setCurrentIndex(idx)
 
     def closeEvent(self, event) -> None:  # noqa: ANN001, N802
@@ -478,7 +497,16 @@ class MainWindow(QMainWindow):
         v.addWidget(self._k_spin)
 
         self._agent_combo = QComboBox()
-        self._agent_combo.addItems(["Ask (RAG)", "Knowledge agent", "Tasks agent", "All tools"])
+        self._agent_combo.addItems(
+            [
+                "Ask (RAG)",
+                "Chat (auto)",
+                "Knowledge agent",
+                "Tasks agent",
+                "All tools",
+                "Planner",
+            ]
+        )
         v.addWidget(self._agent_combo)
 
         v.addStretch(1)
@@ -499,7 +527,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Settings saved",
-                "Model names apply on next restart. k and hybrid weight are saved.",
+                "Settings apply to the next message.",
             )
 
     def _build_input_row(self) -> QWidget:
@@ -649,14 +677,15 @@ class MainWindow(QMainWindow):
 
         k = self._k_spin.value()
         mode_idx = self._agent_combo.currentIndex()
-        if mode_idx == 0:
-            agent_mode = "ask"
-        elif mode_idx == 1:
-            agent_mode = "knowledge"
-        elif mode_idx == 2:
-            agent_mode = "tasks"
-        else:
-            agent_mode = "all"
+        mode_map = {
+            0: "ask",
+            1: "chat",
+            2: "knowledge",
+            3: "tasks",
+            4: "all",
+            5: "planner",
+        }
+        agent_mode = mode_map.get(mode_idx, "ask")
         runnable = RagRunnable(text, k, agent_mode=agent_mode)
         runnable.signals.finished.connect(self._on_rag_finished)
         runnable.signals.error.connect(self._on_rag_error)
@@ -724,7 +753,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_library(self) -> None:
         try:
-            settings = Settings.from_env()
+            settings = Settings.load()
             conn = connect(settings)
             rows = list_documents(conn)
             self._doc_list.clear()
@@ -744,7 +773,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_stats(self) -> None:
         try:
-            settings = Settings.from_env()
+            settings = Settings.load()
             collection = get_collection(settings)
             n_chunks = collection.count()
             conn = connect(settings)

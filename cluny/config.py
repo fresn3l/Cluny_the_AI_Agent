@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
@@ -100,11 +100,34 @@ class Settings:
     chunk_journal_overlap: int
     chunk_default_size: int
     chunk_default_overlap: int
+    supervisor_mode: str
+    api_bind_host: str
+    api_port: int
+    api_token: str
+    backup_dir: Path
 
     @property
     def catalog_root(self) -> Path:
         """Directory under data_dir that holds the SQLite DB and managed file copies."""
         return self.data_dir / self.catalog_dir_name
+
+    def with_user_overlay(self) -> "Settings":
+        """Merge user_config.json overrides (models, k, hybrid weight)."""
+        from cluny.user_config import load_user_config
+
+        uc = load_user_config(self)
+        return replace(
+            self,
+            chat_model=uc.chat_model or self.chat_model,
+            embed_model=uc.embed_model or self.embed_model,
+            retrieval_k=max(1, uc.retrieval_k) if uc.retrieval_k else self.retrieval_k,
+            hybrid_vector_weight=uc.hybrid_vector_weight,
+        )
+
+    @classmethod
+    def load(cls) -> "Settings":
+        """Env settings with user_config.json overlay applied."""
+        return cls.from_env().with_user_overlay()
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -122,6 +145,21 @@ class Settings:
         url_mode = _get("CLUNY_URL_MODE", "open").lower()
         if url_mode not in ("open", "restricted"):
             url_mode = "open"
+
+        rerank = _get("CLUNY_RERANK", "off").lower()
+        if rerank not in ("off", "llm", "cross"):
+            rerank = "off"
+
+        sup = _get("CLUNY_SUPERVISOR", "llm").lower()
+        if sup not in ("llm", "regex"):
+            sup = "llm"
+
+        raw_backup = _get("CLUNY_BACKUP_DIR", "backups")
+        backup_p = Path(raw_backup).expanduser()
+        if not backup_p.is_absolute():
+            backup_p = (data / backup_p).resolve()
+
+        api_token = _get("CLUNY_API_TOKEN", "")
 
         return cls(
             ollama_base_url=_get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
@@ -145,9 +183,7 @@ class Settings:
             ollama_timeout_sec=max(10.0, _float("OLLAMA_TIMEOUT_SEC", 120.0)),
             ollama_retries=max(0, _int("OLLAMA_RETRIES", 2)),
             embed_batch_size=max(1, _int("CLUNY_EMBED_BATCH_SIZE", 8)),
-            rerank_mode=_get("CLUNY_RERANK", "off").lower()
-            if _get("CLUNY_RERANK", "off").lower() in ("off", "llm")
-            else "off",
+            rerank_mode=rerank,
             chunk_pdf_size=max(400, _int("CLUNY_CHUNK_PDF_SIZE", 1500)),
             chunk_pdf_overlap=max(0, _int("CLUNY_CHUNK_PDF_OVERLAP", 250)),
             chunk_md_size=max(400, _int("CLUNY_CHUNK_MD_SIZE", 1200)),
@@ -156,4 +192,9 @@ class Settings:
             chunk_journal_overlap=max(0, _int("CLUNY_CHUNK_JOURNAL_OVERLAP", 100)),
             chunk_default_size=max(400, _int("CLUNY_CHUNK_DEFAULT_SIZE", 1200)),
             chunk_default_overlap=max(0, _int("CLUNY_CHUNK_DEFAULT_OVERLAP", 200)),
+            supervisor_mode=sup,
+            api_bind_host=_get("CLUNY_API_BIND", "127.0.0.1"),
+            api_port=max(1, _int("CLUNY_API_PORT", 8787)),
+            api_token=api_token,
+            backup_dir=backup_p,
         )

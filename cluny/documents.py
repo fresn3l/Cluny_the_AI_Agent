@@ -204,6 +204,62 @@ def add_file(
     return IndexResult(doc_id=doc_id, chunk_count=n, unchanged=False)
 
 
+def add_inline_text(
+    settings: Settings,
+    collection: Collection,
+    ollama: OllamaClient,
+    text: str,
+    *,
+    source_label: str = "inline",
+    title: str | None = None,
+    chunk_size: int = 1200,
+    overlap: int = 200,
+) -> IndexResult:
+    """Index pasted text and register it in the catalog as kind=inline."""
+    if not text.strip():
+        raise ExtractionError("Text is empty.")
+
+    chash = _content_hash(text)
+    kind = "inline"
+    display_title = (title.strip() if title else None) or source_label
+    catalog_path = f"inline:{source_label}:{chash[:12]}"
+    size_bytes = len(text.encode("utf-8"))
+
+    conn = connect(settings)
+    existing = get_by_path(conn, catalog_path)
+    doc_id = existing.id if existing else uuid.uuid4().hex
+
+    if existing and existing.content_hash == chash:
+        conn.close()
+        return IndexResult(doc_id=doc_id, chunk_count=existing.chunk_count, unchanged=True)
+
+    if existing:
+        _delete_vectors(collection, doc_id)
+        delete_chunks_for_doc(conn, doc_id)
+
+    extra = _meta_str({"doc_id": doc_id, "kind": kind})
+    n, parts = ingest_string(
+        collection,
+        ollama,
+        text,
+        source_label=display_title,
+        max_chars=chunk_size,
+        overlap=overlap,
+        extra_metadata=extra,
+        return_chunks=True,
+        settings=settings,
+    )
+
+    replace_chunks(conn, doc_id, parts)
+    upsert_document(conn, doc_id, catalog_path, kind, display_title, chash, size_bytes, n)
+    conn.close()
+
+    if n == 0:
+        raise ExtractionError("Nothing was indexed from inline text.")
+
+    return IndexResult(doc_id=doc_id, chunk_count=n, unchanged=False)
+
+
 def add_url(
     settings: Settings,
     collection: Collection,

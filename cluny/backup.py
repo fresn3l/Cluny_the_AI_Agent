@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cluny.config import Settings
@@ -14,9 +15,11 @@ def export_data(
     settings: Settings,
     *,
     include_files: bool = True,
+    password: str | None = None,
 ) -> Path:
     """
     Create a zip archive of library.sqlite, chroma/, and optional managed files/.
+    When password is set, uses AES encryption (requires pyzipper).
     Returns the path to the created archive.
     """
     out = out_path.expanduser().resolve()
@@ -31,7 +34,30 @@ def export_data(
 
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    manifest = (
+        f"CLUNY_DATA_DIR={data_dir}\n"
+        f"CLUNY_CATALOG_DIR={settings.catalog_dir_name}\n"
+        f"CLUNY_LIBRARY_SQLITE={settings.library_sqlite_name}\n"
+    )
+
+    if password:
+        try:
+            import pyzipper
+        except ImportError as e:
+            raise RuntimeError(
+                "Encrypted export requires pyzipper. Install with: pip install -e '.[backup]'"
+            ) from e
+        zf_ctx = pyzipper.AESZipFile(
+            out,
+            "w",
+            compression=pyzipper.ZIP_DEFLATED,
+            encryption=pyzipper.WZ_AES,
+        )
+        zf_ctx.setpassword(password.encode("utf-8"))
+    else:
+        zf_ctx = zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED)
+
+    with zf_ctx as zf:
         if sqlite.is_file():
             zf.write(sqlite, arcname=f"library/{settings.library_sqlite_name}")
         if chroma.is_dir():
@@ -42,15 +68,17 @@ def export_data(
             for f in files_dir.rglob("*"):
                 if f.is_file():
                     zf.write(f, arcname=str(Path("library/files") / f.relative_to(files_dir)))
-
-        manifest = (
-            f"CLUNY_DATA_DIR={data_dir}\n"
-            f"CLUNY_CATALOG_DIR={settings.catalog_dir_name}\n"
-            f"CLUNY_LIBRARY_SQLITE={settings.library_sqlite_name}\n"
-        )
         zf.writestr("MANIFEST.txt", manifest)
 
     return out
+
+
+def run_scheduled_backup(settings: Settings, *, include_files: bool = True) -> Path:
+    """Write a timestamped backup zip to settings.backup_dir."""
+    settings.backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out = settings.backup_dir / f"cluny-{stamp}.zip"
+    return export_data(out, settings, include_files=include_files)
 
 
 def restore_data(
@@ -58,6 +86,7 @@ def restore_data(
     settings: Settings,
     *,
     merge: bool = False,
+    password: str | None = None,
 ) -> None:
     """
     Extract a Cluny export zip into the configured data directory.
@@ -79,6 +108,19 @@ def restore_data(
 
     data_dir.mkdir(parents=True, exist_ok=True)
     catalog.mkdir(parents=True, exist_ok=True)
+
+    if password:
+        try:
+            import pyzipper
+        except ImportError as e:
+            raise RuntimeError(
+                "Encrypted import requires pyzipper. Install with: pip install -e '.[backup]'"
+            ) from e
+        zf = pyzipper.AESZipFile(archive, "r")
+        zf.setpassword(password.encode("utf-8"))
+        with zf:
+            zf.extractall(data_dir)
+        return
 
     with zipfile.ZipFile(archive, "r") as zf:
         zf.extractall(data_dir)
