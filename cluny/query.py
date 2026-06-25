@@ -132,6 +132,27 @@ def _llm_rerank(
     return [c for c, _ in scored[:k]]
 
 
+def _cross_rerank(
+    chunks: list[RetrievedChunk],
+    question: str,
+    *,
+    k: int,
+) -> list[RetrievedChunk]:
+    """Re-score chunks with a local cross-encoder (optional dep)."""
+    if len(chunks) <= k:
+        return chunks
+    try:
+        from sentence_transformers import CrossEncoder
+    except ImportError:
+        return chunks[:k]
+
+    model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    pairs = [(question, ch.text[:512]) for ch in chunks]
+    scores = model.predict(pairs)
+    scored = sorted(zip(chunks, scores, strict=False), key=lambda x: float(x[1]), reverse=True)
+    return [c for c, _ in scored[:k]]
+
+
 def retrieve(
     question: str,
     *,
@@ -144,7 +165,7 @@ def retrieve(
     """Hybrid vector + FTS retrieval shared by ask, search, and agent tools."""
     settings = settings or Settings.from_env()
     pool = max(k, settings.retrieval_k)
-    if settings.rerank_mode == "llm":
+    if settings.rerank_mode in ("llm", "cross"):
         pool = max(pool, k * 3)
 
     conn = connect(settings)
@@ -214,6 +235,8 @@ def retrieve(
 
     if settings.rerank_mode == "llm" and len(merged) > k:
         merged = _llm_rerank(merged, question, k=k, settings=settings)
+    elif settings.rerank_mode == "cross" and len(merged) > k:
+        merged = _cross_rerank(merged, question, k=k)
     else:
         merged = merged[:k]
 

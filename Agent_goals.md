@@ -1,52 +1,45 @@
 
+## CLUNY
+ Cluny is to serve as a Knowledge RAG. I will have more than one agent, and cluny is to be the private, local only RAG.
+ Personal knowledge base — summarizing articles, books, and notes into a searchable second brain
 
 ## Goals
 The goal is for this to be coded and customizable, so API + custom code (self-hosted)
 This is also a learning project  for me. We should focus on thorough explanations and aim to develop my understanding of AI agents, architecture, tools, etc. 
 
-# Second Brain / Knowledge
-Personal knowledge base — summarizing articles, books, and notes into a searchable second brain
-
-# Task management
-breaking goals into steps, assigning deadlines, and tracking progress
-
-# Personal Life Management
-Calendar optimization — scheduling meetings, blocking focus time, managing conflicts
-Travel planning — end-to-end trip research, booking coordination, and itinerary building
-Finance tracking — monitoring spending, summarizing statements, flagging anomalies
-Health & habit coaching — logging workouts, meals, or moods and giving personalized feedback
-
 ---
 
-## Planning — current baseline
+## Planning — current baseline (Sprints 1–9)
 
-What exists today (**Cluny**): local **RAG** second brain — Ollama for embeddings + chat, **Chroma** for vectors, **SQLite** catalog, CLI ingest / `add-dir` / `ask`. Self-hosted, customizable, aligned with “coded and customizable.”
+**Cluny** is a local-first platform:
+
+| Layer | What ships |
+|-------|------------|
+| **Stores** | SQLite catalog + FTS5, Chroma vectors, `tasks.sqlite`, `calendar.sqlite`, chat sessions |
+| **Retrieval** | Hybrid vector + keyword, optional LLM or cross-encoder rerank |
+| **Entry points** | CLI (`ask`, `agent`, `chat`, `tasks`, `serve`), PySide6 GUI, localhost HTTP API |
+| **Agents** | Knowledge / tasks / all / **planner** tool namespaces; LLM supervisor with regex fallback |
+| **Ops** | Export/import zip, `cluny backup run`, optional AES export (`--password`) |
+| **Quality** | Golden eval harness + CI (FTS-only + optional full eval on `golden-local.yaml`) |
+
+Self-hosted, customizable, aligned with “coded and customizable.”
 
 ---
 
 ## Next steps (brainstorm — second brain / knowledge)
 
-- **Ingestion quality:** URL capture (with your own rules), better PDF pipeline (OCR for scans), optional HTML/Markdown from web with source URL stored in metadata.
-- **Retrieval quality:** hybrid search (keyword + vector), re-ranking, optional small cross-encoder; tune chunking per doc type.
-- **Organization:** tags / collections in SQLite, “projects” or notebooks, light dedup and “replace document” UX.
-- **Interaction:** small **TUI or web UI** on top of the same Python core (still local); optional streaming answers.
-- **Evaluation:** a fixed set of “golden questions” you rerun after prompt or pipeline changes so quality doesn’t drift silently.
-- **Ops:** backup story for `CLUNY_DATA_DIR`, export snapshots, optional encryption at rest for the data dir.
+- **Integrations:** CalDAV / Google Calendar two-way sync; multi-device sync (Syncthing or manifest-based).
+- **Retrieval:** Tune cross-encoder model; collection-scoped eval; more golden cases on your real index.
+- **API clients:** Shortcuts, scripts, future mobile capture via `cluny serve`.
+- **Verticals:** Finance / health schemas (local-first, minimal cloud).
 
 ---
 
-## Task / productivity goals — one agent vs separate agent?
+## Task / productivity — current shape
 
-**Option A — one Cluny with tool namespaces**  
-Single orchestrator (Ollama + tool loop): **knowledge tools** (`search_brain`, `add_note`) vs **task tools** (`create_task`, `list_tasks`, `update_deadline`) backed by SQLite (or CalDAV later). One personality, shared memory of “you,” simpler deployment; risk is prompt complexity and accidental tool misuse if scopes blur.
+**Implemented:** Option C lite — one repo, `cluny agent --mode knowledge|tasks|all|planner`, plus `cluny chat` supervisor and task/calendar tools. Task recurrence (`--every daily|weekly|monthly`), natural due dates (`tomorrow`, `+3d`).
 
-**Option B — separate “task agent”**  
-Second small service or CLI (e.g. **Cluny-tasks** or a worker) that only handles goals/steps/deadlines and talks to its own DB schema; Cluny stays **retrieve-then-answer** for knowledge. Clear separation of concerns, easier to test tasks without touching RAG; you glue them in a **supervisor** later if you want one chat entrypoint.
-
-**Option C — same repo, two modes**  
-One codebase, `cluny brain …` vs `cluny tasks …` (or `--mode`), shared config but **no** mixing of tools in a single LLM call until you explicitly add a “planner” mode that calls both.
-
-**Rough recommendation for learning:** finish **second brain** retrieval + catalog until it feels boringly reliable, then add **task storage + CRUD as explicit tools** (Option A lite or C). Split a dedicated task agent (B) only if task logic (recurrence, calendar sync) starts dominating the codebase.
+**Planner mode** orchestrates search_brain then create_task in one agent session (max 12 turns). Supervisor routes compound questions to planner.
 
 ---
 
@@ -61,14 +54,15 @@ Calendar / travel / finance / health each imply **integrations + permissions + s
 1. Solid **RAG** mental model (chunking, retrieval failure modes, when to cite vs hallucinate).
 2. **Tool-calling loop** (one tool at a time vs parallel; validation; timeouts).
 3. **Memory layers:** session vs persistent catalog vs vector store — what belongs where.
-4. **Safety/privacy** for local vs API keys and for finance/health-shaped data.
+4. **Router vs planner:** intent classification vs multi-step orchestration in one session.
+5. **API vs CLI:** same domain logic, different transport (SSE for streaming).
+6. **Safety/privacy** for local vs API keys and for finance/health-shaped data.
 
 ---
 
 ## Open questions (fill in as you decide)
 
-- [ ] Primary UI for the next year: CLI only, TUI, or local web?
+- [ ] Primary UI for the next year: CLI, GUI, or API clients?
 - [ ] Single machine only, or sync second brain across devices (and how)?
-- [ ] Task agent: separate binary/repo or submodule of this repo?
-- [ ] Which vertical after second brain: **tasks** vs **calendar** vs **language practice**?
-
+- [ ] Which vertical after tasks+calendar: **language practice** vs **finance**?
+- [ ] Cloud LLM providers (OpenAI/Anthropic) — stay local-only or optional?
