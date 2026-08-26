@@ -1,0 +1,27 @@
+#!/bin/bash
+# Launcher for Cluny.app — opens the PySide6 GUI without Terminal.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_FILE="$SCRIPT_DIR/../Resources/cluny_repo.txt"
+
+if [[ -f "$REPO_FILE" ]]; then
+  REPO="$(tr -d '\n' < "$REPO_FILE")"
+else
+  REPO="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+fi
+
+fail() {
+  osascript -e "display dialog \"$1\" buttons {\"OK\"} default button 1 with title \"Cluny\"" 2>/dev/null || echo "$1" >&2
+  exit 1
+}
+
+[[ -d "$REPO" ]] || fail "Cluny repo not found. Re-run: ./macos/install_app.sh"
+[[ -x "$REPO/run_cluny.sh" ]] || fail "Cluny repo looks wrong (missing run_cluny.sh). Re-run: ./macos/install_app.sh"
+
+if [[ ! -x "$REPO/.venv/bin/cluny" ]]; then
+  fail "Cluny is not set up yet. Open Terminal in the repo and run:\n\n./setup_venv.sh"
+fi
+
+cd "$REPO"
+exec "$REPO/run_cluny.sh" gui

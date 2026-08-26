@@ -137,6 +137,14 @@ cluny gui
 # or: python -m cluny.gui
 ```
 
+**One click on macOS (Dock / Spotlight):**
+
+```bash
+./macos/install_app.sh
+```
+
+That builds **Cluny.app**, installs it to `~/Applications/`, and you can drag it to the Dock. Re-run `install_app.sh` if you move the repo folder.
+
 Ollama must be running; ingest notes first (`cluny add`, `cluny add-dir`, etc.).
 
 ### Stats
