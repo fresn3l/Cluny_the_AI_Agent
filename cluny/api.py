@@ -3,21 +3,33 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
+
+import httpx
 
 from cluny.agent import run_agent
 from cluny.config import Settings
+from cluny.context import build_day_context, build_meeting_context
 from cluny.documents import add_inline_text
-from cluny.library_db import connect, list_documents
-from cluny.ollama_client import OllamaError
-from cluny.query import retrieve
-from cluny.query import rag_answer_stream
+from cluny.library_db import connect, document_count, list_documents
+from cluny.ollama_client import OllamaClient, OllamaError
+from cluny.query import rag_answer_stream, retrieve
 from cluny.store import get_collection
 from cluny.supervisor import run_chat
-from cluny.tasks_db import connect as tasks_connect, create_task as db_create_task
+from cluny.tasks_db import (
+    TaskRow,
+    complete_task,
+    connect as tasks_connect,
+    create_task as db_create_task,
+    delete_task,
+    list_tasks,
+    resolve_task,
+    update_task,
+)
 
 try:
-    from fastapi import Depends, FastAPI, Header, HTTPException, Request
+    from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
     from fastapi.responses import StreamingResponse
     from pydantic import BaseModel, Field
 except ImportError as e:  # pragma: no cover
@@ -49,6 +61,17 @@ class TaskCreateRequest(BaseModel):
     notes: str | None = None
     project_id: str | None = None
     recurrence: str | None = None
+    external_id: str | None = None
+
+
+class TaskUpdateRequest(BaseModel):
+    title: str | None = None
+    due_at: str | None = None
+    notes: str | None = None
+    status: str | None = None
+    project_id: str | None = None
+    recurrence: str | None = None
+    external_id: str | None = None
 
 
 class AgentRequest(BaseModel):
@@ -58,6 +81,19 @@ class AgentRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str
+
+
+class ContextDayRequest(BaseModel):
+    date: str
+
+
+class ContextMeetingRequest(BaseModel):
+    title: str
+    date: str | None = None
+
+
+class CalendarImportRequest(BaseModel):
+    path: str
 
 
 def _settings() -> Settings:
@@ -89,14 +125,66 @@ def _check_auth(
         raise HTTPException(status_code=401, detail="Invalid API token")
 
 
+def _task_dict(t: TaskRow) -> dict[str, Any]:
+    return {
+        "id": t.id,
+        "title": t.title,
+        "status": t.status,
+        "due_at": t.due_at,
+        "created_at": t.created_at,
+        "notes": t.notes,
+        "project_id": t.project_id,
+        "recurrence": t.recurrence,
+        "external_id": t.external_id,
+    }
+
+
+def _ollama_ok(settings: Settings) -> bool:
+    try:
+        with httpx.Client(timeout=3.0) as client:
+            r = client.get(f"{settings.ollama_base_url}/api/tags")
+            return r.status_code == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Cluny API", version="0.1.0")
+    app = FastAPI(
+        title="Cluny API",
+        version="0.2.0",
+        description="Brain service for Kosistenz — journal, calendar, todos, RAG.",
+    )
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
+    def health(settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        doc_count = 0
+        task_count = 0
+        chunk_count = 0
+        try:
+            conn = connect(settings)
+            doc_count = document_count(conn)
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            tconn = tasks_connect(settings)
+            task_count = len(list_tasks(tconn))
+            tconn.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            chunk_count = get_collection(settings).count()
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            "status": "ok",
+            "ollama_ok": _ollama_ok(settings),
+            "doc_count": doc_count,
+            "task_count": task_count,
+            "chunk_count": chunk_count,
+        }
 
-    @app.post("/search", dependencies=[Depends(_check_auth)])
+    @app.post("/search", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def search(body: SearchRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         try:
             chunks = retrieve(body.query, k=body.k, settings=settings)
@@ -115,7 +203,7 @@ def create_app() -> FastAPI:
             ]
         }
 
-    @app.post("/ask", dependencies=[Depends(_check_auth)])
+    @app.post("/ask", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def ask(body: AskRequest, settings: Settings = Depends(_settings)) -> StreamingResponse:
         try:
             stream, sources, empty = rag_answer_stream(body.question, k=body.k, settings=settings)
@@ -134,10 +222,8 @@ def create_app() -> FastAPI:
 
         return StreamingResponse(event_gen(), media_type="text/event-stream")
 
-    @app.post("/ingest/text", dependencies=[Depends(_check_auth)])
+    @app.post("/ingest/text", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def ingest_text(body: IngestTextRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
-        from cluny.ollama_client import OllamaClient
-
         collection = get_collection(settings)
         ollama = OllamaClient(settings)
         try:
@@ -170,7 +256,7 @@ def create_app() -> FastAPI:
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
 
-    @app.get("/library", dependencies=[Depends(_check_auth)])
+    @app.get("/library", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def library(settings: Settings = Depends(_settings)) -> dict[str, Any]:
         conn = connect(settings)
         docs = list_documents(conn)
@@ -188,7 +274,28 @@ def create_app() -> FastAPI:
             ]
         }
 
-    @app.post("/tasks", dependencies=[Depends(_check_auth)])
+    @app.get("/tasks", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    def get_tasks(
+        settings: Settings = Depends(_settings),
+        status: str | None = Query(default=None),
+        project_id: str | None = Query(default=None),
+        due_before: str | None = Query(default=None),
+        due_week: bool = Query(default=False),
+        external_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        conn = tasks_connect(settings)
+        rows = list_tasks(
+            conn,
+            status=status,
+            project_id=project_id,
+            due_before=due_before,
+            due_week=due_week,
+            external_id=external_id,
+        )
+        conn.close()
+        return {"tasks": [_task_dict(t) for t in rows]}
+
+    @app.post("/tasks", dependencies=[Depends(_check_auth)], tags=["Tasks"])
     def create_task(body: TaskCreateRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         conn = tasks_connect(settings)
         task = db_create_task(
@@ -198,17 +305,118 @@ def create_app() -> FastAPI:
             notes=body.notes,
             project_id=body.project_id,
             recurrence=body.recurrence,
+            external_id=body.external_id,
         )
         conn.close()
+        return _task_dict(task)
+
+    @app.get("/tasks/{task_id}", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    def get_task(task_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        conn = tasks_connect(settings)
+        task = resolve_task(conn, task_id)
+        conn.close()
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return _task_dict(task)
+
+    @app.patch("/tasks/{task_id}", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    def patch_task(
+        task_id: str,
+        body: TaskUpdateRequest,
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        conn = tasks_connect(settings)
+        task = resolve_task(conn, task_id)
+        if task is None:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Task not found")
+        updated = update_task(
+            conn,
+            task.id,
+            title=body.title,
+            due_at=body.due_at,
+            notes=body.notes,
+            status=body.status,
+            project_id=body.project_id,
+            recurrence=body.recurrence,
+            external_id=body.external_id,
+        )
+        conn.close()
+        assert updated is not None
+        return _task_dict(updated)
+
+    @app.post("/tasks/{task_id}/complete", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    def complete_task_route(task_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        conn = tasks_connect(settings)
+        task = resolve_task(conn, task_id)
+        if task is None:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Task not found")
+        done = complete_task(conn, task.id)
+        conn.close()
+        assert done is not None
+        return _task_dict(done)
+
+    @app.delete("/tasks/{task_id}", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    def delete_task_route(task_id: str, settings: Settings = Depends(_settings)) -> dict[str, str]:
+        conn = tasks_connect(settings)
+        task = resolve_task(conn, task_id)
+        if task is None:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Task not found")
+        delete_task(conn, task.id)
+        conn.close()
+        return {"deleted": task.id}
+
+    @app.get("/calendar/events", dependencies=[Depends(_check_auth)], tags=["Calendar"])
+    def calendar_events(
+        settings: Settings = Depends(_settings),
+        limit: int = Query(default=20, ge=1, le=100),
+        date: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        from cluny.calendar_db import connect as cal_connect, events_on_date, list_upcoming
+
+        conn = cal_connect(settings)
+        if date:
+            rows = events_on_date(conn, date)
+        else:
+            rows = list_upcoming(conn, limit=limit)
+        conn.close()
         return {
-            "id": task.id,
-            "title": task.title,
-            "status": task.status,
-            "due_at": task.due_at,
-            "recurrence": task.recurrence,
+            "events": [
+                {
+                    "id": e.id,
+                    "summary": e.summary,
+                    "start_at": e.start_at,
+                    "end_at": e.end_at,
+                    "location": e.location,
+                }
+                for e in rows
+            ]
         }
 
-    @app.post("/agent", dependencies=[Depends(_check_auth)])
+    @app.post("/calendar/import", dependencies=[Depends(_check_auth)], tags=["Calendar"])
+    def calendar_import(body: CalendarImportRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        from cluny.calendar_db import import_ics
+
+        try:
+            n = import_ics(Path(body.path), settings)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        return {"imported": n}
+
+    @app.post("/context/day", dependencies=[Depends(_check_auth)], tags=["Context"])
+    def context_day(body: ContextDayRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        return build_day_context(settings, body.date)
+
+    @app.post("/context/meeting", dependencies=[Depends(_check_auth)], tags=["Context"])
+    def context_meeting(
+        body: ContextMeetingRequest,
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        return build_meeting_context(settings, title=body.title, date=body.date)
+
+    @app.post("/agent", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def agent(body: AgentRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         if body.mode not in ("knowledge", "tasks", "all", "planner"):
             raise HTTPException(status_code=400, detail="Invalid mode")
@@ -218,7 +426,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=502, detail=str(e)) from e
         return {"answer": result.answer, "tool_calls": result.tool_calls}
 
-    @app.post("/chat", dependencies=[Depends(_check_auth)])
+    @app.post("/chat", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def chat(body: ChatRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         try:
             result = run_chat(body.question, settings=settings)

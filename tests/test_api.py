@@ -23,7 +23,11 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path):
 def test_health(client: TestClient):
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+    data = r.json()
+    assert data["status"] == "ok"
+    assert "ollama_ok" in data
+    assert "doc_count" in data
+    assert "task_count" in data
 
 
 def test_search_mocked(client: TestClient):

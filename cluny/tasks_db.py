@@ -51,6 +51,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         """
     )
     _ensure_column(conn, "tasks", "recurrence", "TEXT")
+    _ensure_column(conn, "tasks", "external_id", "TEXT")
     conn.commit()
 
 
@@ -64,6 +65,7 @@ class TaskRow:
     notes: str | None
     project_id: str | None
     recurrence: str | None = None
+    external_id: str | None = None
 
 
 def _row_to_task(row: sqlite3.Row) -> TaskRow:
@@ -77,6 +79,7 @@ def _row_to_task(row: sqlite3.Row) -> TaskRow:
         notes=str(row["notes"]) if row["notes"] is not None else None,
         project_id=str(row["project_id"]) if row["project_id"] is not None else None,
         recurrence=str(row["recurrence"]) if "recurrence" in keys and row["recurrence"] else None,
+        external_id=str(row["external_id"]) if "external_id" in keys and row["external_id"] else None,
     )
 
 
@@ -88,16 +91,17 @@ def create_task(
     notes: str | None = None,
     project_id: str | None = None,
     recurrence: str | None = None,
+    external_id: str | None = None,
 ) -> TaskRow:
     task_id = uuid.uuid4().hex
     now = _utc_now()
     parsed_due = parse_due(due_at) if due_at else None
     conn.execute(
         """
-        INSERT INTO tasks (id, title, status, due_at, created_at, notes, project_id, recurrence)
-        VALUES (?, ?, 'open', ?, ?, ?, ?, ?)
+        INSERT INTO tasks (id, title, status, due_at, created_at, notes, project_id, recurrence, external_id)
+        VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?)
         """,
-        (task_id, title.strip(), parsed_due, now, notes, project_id, recurrence),
+        (task_id, title.strip(), parsed_due, now, notes, project_id, recurrence, external_id),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
@@ -112,6 +116,7 @@ def list_tasks(
     project_id: str | None = None,
     due_before: str | None = None,
     due_week: bool = False,
+    external_id: str | None = None,
 ) -> list[TaskRow]:
     q = "SELECT * FROM tasks WHERE 1=1"
     params: list[str] = []
@@ -121,6 +126,9 @@ def list_tasks(
     if project_id:
         q += " AND project_id = ?"
         params.append(project_id)
+    if external_id:
+        q += " AND external_id = ?"
+        params.append(external_id)
     if due_before:
         parsed = parse_due(due_before) or due_before
         q += " AND due_at IS NOT NULL AND due_at <= ?"
@@ -167,6 +175,7 @@ def update_task(
     status: str | None = None,
     project_id: str | None = None,
     recurrence: str | None = None,
+    external_id: str | None = None,
 ) -> TaskRow | None:
     task = get_task(conn, task_id)
     if task is None:
@@ -177,12 +186,13 @@ def update_task(
     new_status = status if status is not None else task.status
     new_project = project_id if project_id is not None else task.project_id
     new_rec = recurrence if recurrence is not None else task.recurrence
+    new_ext = external_id if external_id is not None else task.external_id
     conn.execute(
         """
-        UPDATE tasks SET title=?, due_at=?, notes=?, status=?, project_id=?, recurrence=?
+        UPDATE tasks SET title=?, due_at=?, notes=?, status=?, project_id=?, recurrence=?, external_id=?
         WHERE id=?
         """,
-        (new_title, new_due, new_notes, new_status, new_project, new_rec, task_id),
+        (new_title, new_due, new_notes, new_status, new_project, new_rec, new_ext, task_id),
     )
     conn.commit()
     return get_task(conn, task_id)

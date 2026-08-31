@@ -220,7 +220,20 @@ cluny calendar import calendar.ics
 - Embeddings and chat go to **your machine** via Ollama.
 - Back up `CLUNY_DATA_DIR` if you care about the catalog and index.
 
+## HTTP API (Kosistenz integration)
+
+Cluny is the **brain service** behind **[Kosistenz](https://github.com/fresn3l/Kosistenz)** (journal, calendar, todos). Start the API for Kosistenz or other local clients:
+
+```bash
+pip install -e ".[api]"
+cluny serve
+# http://127.0.0.1:8787/health  ·  /docs for OpenAPI
+```
+
+See **`INTEGRATION.md`** for endpoints, auth, `external_id: kosistenz:{uuid}`, context bundles, and a Swift client sketch. Optional login service: `macos/com.cluny.serve.plist`.
+
 ## Docs
 
+- `INTEGRATION.md` — Kosistenz HTTP contract  
 - `Agent_goals.md` — product goals  
 - `BUILD_CHECKLIST.md` — engineering checklist  

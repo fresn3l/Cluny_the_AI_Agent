@@ -26,6 +26,19 @@ Self-hosted, customizable, aligned with “coded and customizable.”
 
 ---
 
+## Platform — Kosistenz + Cluny
+
+**[Kosistenz](https://github.com/fresn3l/Kosistenz)** is the **home-base Mac app** (journal, calendar, to-dos, day planning). **Cluny** (this repo) is the **brain service** behind it: RAG, agents, task/calendar stores, and `cluny serve` HTTP API.
+
+| Repo | Role |
+|------|------|
+| **Kosistenz** | Primary UI — what you open daily |
+| **Cluny_the_AI_Agent** | Intelligence + durable stores — what Kosistenz calls over localhost |
+
+Cluny widget and full GUI remain useful alongside Kosistenz (quick capture and deep library browse). Sprint 11 delivers the API contract Kosistenz consumes — see [Sprints_11.md](Sprints_11.md).
+
+---
+
 ## Next steps (brainstorm — second brain / knowledge)
 
 - **Integrations:** CalDAV / Google Calendar two-way sync; multi-device sync (Syncthing or manifest-based).
