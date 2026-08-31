@@ -130,22 +130,37 @@ cluny ask "What did the Smith paper say about working memory?"
 
 ### Desktop app (no browser, no HTTP)
 
-Native **PySide6** window: same RAG as `cluny ask`, with a chat transcript, optional **source** previews, and a sidebar for index **stats** and retrieval **k**.
+**Menu bar widget (daily use — recommended):**
+
+Compact popover for Ask (auto-routed chat), Capture, Task, and Glance. One unified **`Cluny.app`** — menu bar by default; open the full window from the tray menu when you need the library sidebar.
+
+```bash
+cluny widget
+# or: python -m cluny.widget
+```
+
+**Full chat window** (library sidebar, sessions, all agent modes):
 
 ```bash
 cluny gui
 # or: python -m cluny.gui
 ```
 
-**One click on macOS (Dock / Spotlight):**
+**One click on macOS (menu bar):**
 
 ```bash
 ./macos/install_app.sh
 ```
 
-That builds **Cluny.app**, installs it to `~/Applications/`, and you can drag it to the Dock. Re-run `install_app.sh` if you move the repo folder.
+That builds **Cluny.app** and installs it to `~/Applications/`. Launch from Spotlight or add to **Login Items**. Click the menu bar icon for the widget; tray menu → **Open full window** for the full UI. Re-run `install_app.sh` if you move the repo folder.
 
-Ollama must be running; ingest notes first (`cluny add`, `cluny add-dir`, etc.).
+| Surface | Best for |
+|---------|----------|
+| **Widget** | Quick ask, paste capture, add task, glance at stats |
+| **Full GUI** | Long chats, library browse, drag-drop ingest |
+| **CLI** | Batch ingest, watch, eval, backup, scripting |
+
+Ollama must be running for Ask; Capture and Task work without it for local writes (Capture needs Ollama to embed).
 
 ### Stats
 

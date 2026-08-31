@@ -686,6 +686,27 @@ def import_data(
 
 
 @app.command()
+def widget(
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Also open the full chat window on launch.",
+    ),
+) -> None:
+    """Menu bar widget: compact Ask / Capture / Task / Glance panel."""
+    try:
+        from cluny.widget.app import run_widget_app
+    except ImportError as e:
+        typer.echo(
+            "PySide6 is required for the widget. Install dependencies: pip install -e .",
+            err=True,
+        )
+        raise typer.Exit(code=1) from e
+
+    run_widget_app(start_full=full)
+
+
+@app.command()
 def gui() -> None:
     """Open the native desktop chat window (PySide6)."""
     try:

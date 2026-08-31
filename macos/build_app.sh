@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build macos/Cluny.app (Dock-ready GUI launcher).
+# Build macos/Cluny.app (unified menu bar widget + full window launcher).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
