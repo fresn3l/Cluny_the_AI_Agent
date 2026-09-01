@@ -7,23 +7,14 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from cluny.brain_config import DEFAULT_PROMPTS, get_max_proposals, get_prompt
 from cluny.config import Settings
 from cluny.kosistenz_context import KosistenzContext
 from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.query import RetrievedChunk, retrieve
 from cluny.supervisor import format_chat_question
 
-PROPOSE_SYSTEM = (
-    "You suggest work items for the user. Kosistenz owns the calendar and week clock — "
-    "you only propose work, never pick clock times or days.\n"
-    "Use the live Kosistenz context and any retrieved journal/analytics snippets from "
-    "indexed history. Ground proposals in patterns you see (missed goals, slipped tasks, "
-    "journal themes) when relevant.\n"
-    "Reply with ONLY valid JSON, no markdown:\n"
-    '{"proposals": [{"title": "string", "estimate_minutes": number or null, '
-    '"due": "YYYY-MM-DD or null", "keywords": ["string"]}]}\n'
-    "Use an empty proposals array if nothing to suggest."
-)
+PROPOSE_SYSTEM = DEFAULT_PROMPTS["propose_system"]
 
 RETRIEVED_SNIPPETS_HEADER = "Retrieved from indexed journals and analytics:"
 
@@ -129,8 +120,10 @@ def run_proposals(
         retrieved_block=retrieved_block,
     )
     ollama = OllamaClient(settings)
-    raw = ollama.chat(system=PROPOSE_SYSTEM, user=user)
+    raw = ollama.chat(system=get_prompt("propose_system", settings=settings), user=user)
     try:
-        return _parse_proposals(raw)
+        proposals = _parse_proposals(raw)
     except (json.JSONDecodeError, TypeError, ValueError) as e:
         raise OllamaError(f"Could not parse proposal JSON: {e}") from e
+    limit = get_max_proposals(settings=settings)
+    return proposals[:limit]

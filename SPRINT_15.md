@@ -1,6 +1,10 @@
 # Sprint 15+ — Kosistenz integration (next steps)
 
-Cluny brain work for S13–S14 is done. Remaining work splits between **Kosistenz app** (data push + UI) and **Cluny polish**.
+> **Deferred.** Full backlog moved to [`futurework.md`](futurework.md). Resume when ready.
+
+Cluny brain work for S13–S14 is done. Remaining Kosistenz integration work is tracked in `futurework.md`.
+
+**Active sprint:** see [`SPRINT_16.md`](SPRINT_16.md) — Brain Editor GUI.
 
 ---
 
