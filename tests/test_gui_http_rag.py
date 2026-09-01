@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import pytest
 from unittest.mock import MagicMock, patch
 
-from cluny.gui.main_window import RagRunnable
+pytest.importorskip("PySide6")
+
 from cluny.query import RagAnswer
+
+
+def _rag_runnable():
+    from cluny.gui.main_window import RagRunnable
+
+    return RagRunnable
 
 
 def test_rag_runnable_uses_http_stream(settings, monkeypatch):
     monkeypatch.setenv("CLUNY_BRAIN_URL", "http://127.0.0.1:8787")
+    RagRunnable = _rag_runnable()
 
     events = [
         {"route": "ask", "token": "Hello"},
@@ -41,6 +50,7 @@ def test_rag_runnable_uses_http_stream(settings, monkeypatch):
 
 
 def test_rag_runnable_in_process_when_no_brain_url(settings):
+    RagRunnable = _rag_runnable()
     runnable = RagRunnable("hi", k=3, agent_mode="ask")
     tokens: list[str] = []
     runnable.signals.token.connect(tokens.append)
