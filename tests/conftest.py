@@ -44,4 +44,6 @@ def settings(tmp_path: Path) -> Settings:
         api_port=8787,
         api_token="",
         backup_dir=tmp_path / "backups",
+        kosistenz_journal_dir=None,
+        brain_url="",
     )

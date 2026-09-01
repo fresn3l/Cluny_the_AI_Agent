@@ -105,6 +105,8 @@ class Settings:
     api_port: int
     api_token: str
     backup_dir: Path
+    kosistenz_journal_dir: Path | None
+    brain_url: str
 
     @property
     def catalog_root(self) -> Path:
@@ -161,6 +163,13 @@ class Settings:
 
         api_token = _get("CLUNY_API_TOKEN", "")
 
+        kosistenz_journal: Path | None = None
+        raw_kj = _get("CLUNY_KOSISTENZ_JOURNAL_DIR", "").strip()
+        if raw_kj:
+            kosistenz_journal = Path(raw_kj).expanduser().resolve()
+
+        brain_url = _get("CLUNY_BRAIN_URL", "").strip().rstrip("/")
+
         return cls(
             ollama_base_url=_get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
             chat_model=_get("OLLAMA_CHAT_MODEL", "llama3.2"),
@@ -197,4 +206,6 @@ class Settings:
             api_port=max(1, _int("CLUNY_API_PORT", 8787)),
             api_token=api_token,
             backup_dir=backup_p,
+            kosistenz_journal_dir=kosistenz_journal,
+            brain_url=brain_url,
         )

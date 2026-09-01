@@ -77,7 +77,26 @@ def classify_intent(question: str, settings: Settings | None = None) -> Route:
     return classify_intent_llm(question, settings)
 
 
-def _calendar_answer(settings: Settings) -> SupervisorResult:
+def format_chat_question(question: str, context: str | None = None) -> str:
+    """Merge Kosistenz-supplied context into a single user message."""
+    q = question.strip()
+    if not context or not context.strip():
+        return q
+    return f"Context from Kosistenz:\n{context.strip()}\n\nQuestion:\n{q}"
+
+
+def _calendar_answer(settings: Settings, question: str) -> SupervisorResult:
+    if settings.kosistenz_journal_dir:
+        rag = rag_answer(question, settings=settings)
+        return SupervisorResult(
+            route="calendar",
+            answer=(
+                "Calendar and scheduling live in Kosistenz. Include events and deadlines "
+                "in your message — answering from that context and indexed notes.\n\n"
+                + rag.answer
+            ),
+            tool_calls=[],
+        )
     try:
         from cluny.calendar_db import connect as cal_connect, list_upcoming
 
@@ -87,7 +106,11 @@ def _calendar_answer(settings: Settings) -> SupervisorResult:
         if not events:
             return SupervisorResult(
                 route="calendar",
-                answer="No calendar events imported yet. Use `cluny calendar import file.ics`.",
+                answer=(
+                    "No events in Cluny's local calendar.sqlite. "
+                    "Import with `cluny calendar import file.ics`, or — if you use Kosistenz — "
+                    "set CLUNY_KOSISTENZ_JOURNAL_DIR and include your schedule in the question."
+                ),
                 tool_calls=[],
             )
         lines = [f"- {e.summary} ({e.start_at})" for e in events]
@@ -108,24 +131,26 @@ def run_chat(
     question: str,
     *,
     settings: Settings | None = None,
+    context: str | None = None,
 ) -> SupervisorResult:
     settings = settings or Settings.load()
-    route = classify_intent(question, settings)
+    merged = format_chat_question(question, context)
+    route = classify_intent(merged, settings)
 
     if route == "calendar":
-        return _calendar_answer(settings)
+        return _calendar_answer(settings, merged)
 
     if route == "planner":
-        result = run_agent(question, settings=settings, mode="planner")
+        result = run_agent(merged, settings=settings, mode="planner")
         return SupervisorResult(route=route, answer=result.answer, tool_calls=result.tool_calls)
 
     if route == "tasks_agent":
-        result = run_agent(question, settings=settings, mode="tasks")
+        result = run_agent(merged, settings=settings, mode="tasks")
         return SupervisorResult(route=route, answer=result.answer, tool_calls=result.tool_calls)
 
     if route == "knowledge_agent":
-        result = run_agent(question, settings=settings, mode="knowledge")
+        result = run_agent(merged, settings=settings, mode="knowledge")
         return SupervisorResult(route=route, answer=result.answer, tool_calls=result.tool_calls)
 
-    rag = rag_answer(question, settings=settings)
+    rag = rag_answer(merged, settings=settings)
     return SupervisorResult(route="ask", answer=rag.answer, tool_calls=[])

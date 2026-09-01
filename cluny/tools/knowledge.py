@@ -109,6 +109,3 @@ def build_knowledge_tools(settings: Settings) -> list[Tool]:
             handler=lambda args: _add_note(args, settings),
         ),
     ]
-
-
-KNOWLEDGE_TOOLS: list[Tool] = []

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from cluny.agent import run_agent
+from cluny.brain_client import chat_brain
 from cluny.config import Settings
 from cluny.documents import add_file
 from cluny.library_db import (
@@ -45,7 +46,7 @@ from cluny.ollama_client import OllamaError
 from cluny.query import RagAnswer, RagSource, rag_answer_stream
 from cluny.sessions import add_message, connect as sessions_connect, get_or_create_last_session, list_messages
 from cluny.store import get_collection
-from cluny.supervisor import run_chat
+from cluny.store import get_collection
 from cluny.user_config import UserConfig, load_user_config, save_user_config
 
 
@@ -70,7 +71,7 @@ class RagRunnable(QRunnable):
         try:
             settings = Settings.load()
             if self._agent_mode == "chat":
-                result = run_chat(self._question, settings=settings)
+                result = chat_brain(self._question, settings=settings)
                 body = result.answer
                 if result.tool_calls:
                     body = "Tools: " + "; ".join(result.tool_calls) + "\n\n" + body

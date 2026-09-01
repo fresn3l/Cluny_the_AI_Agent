@@ -79,3 +79,20 @@ def test_ingest_journal_copy_mocked(client: TestClient):
     data = r.json()
     assert data["catalog"] is True
     assert data["doc_id"] == "doc-1"
+
+
+def test_propose_mocked(client: TestClient):
+    from cluny.proposals import WorkProposal
+
+    with patch(
+        "cluny.api.run_proposals",
+        return_value=[WorkProposal(title="Ship feature", estimate_minutes=60, due=None, keywords=["dev"])],
+    ):
+        r = client.post(
+            "/propose",
+            json={"question": "What should I work on?", "context": "Goal: ship v1"},
+        )
+    assert r.status_code == 200
+    props = r.json()["proposals"]
+    assert props[0]["title"] == "Ship feature"
+

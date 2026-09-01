@@ -215,15 +215,17 @@ def add_inline_text(
     chunk_size: int = 1200,
     overlap: int = 200,
 ) -> IndexResult:
-    """Index pasted text and register it in the catalog as kind=inline."""
+    """Index pasted text and register it in the catalog."""
     if not text.strip():
         raise ExtractionError("Text is empty.")
 
     chash = _content_hash(text)
-    kind = "inline"
+    is_journal = "journal" in source_label.lower()
+    kind = "journal" if is_journal else "inline"
     display_title = (title.strip() if title else None) or source_label
     catalog_path = f"inline:{source_label}:{chash[:12]}"
     size_bytes = len(text.encode("utf-8"))
+    eff_size, eff_overlap = _effective_chunk_params(kind, settings, chunk_size, overlap)
 
     conn = connect(settings)
     existing = get_by_path(conn, catalog_path)
@@ -243,8 +245,8 @@ def add_inline_text(
         ollama,
         text,
         source_label=display_title,
-        max_chars=chunk_size,
-        overlap=overlap,
+        max_chars=eff_size,
+        overlap=eff_overlap,
         extra_metadata=extra,
         return_chunks=True,
         settings=settings,

@@ -103,7 +103,8 @@ If `CLUNY_API_TOKEN` is set, send `X-Cluny-Token: …` or `Authorization: Bearer
 | Is brain up? | `GET /health` | Disable Ask / ingest if `ollama_ok` is false |
 | Index journal on save | `POST /ingest/text` | **Copy** of entry; Kosistenz keeps canonical file |
 | Search notes | `POST /search` | Retrieval only, no LLM |
-| Ask / natural language | `POST /chat` | Supervisor routes intent |
+| Ask / natural language | `POST /chat` | Optional `context` field with Kosistenz state |
+| Work proposals | `POST /propose` | Structured `{ title, estimate_minutes, due, keywords }[]` |
 | Streaming answer | `POST /ask` | SSE with citations |
 | Deep tool loop | `POST /agent` | Modes: `knowledge`, `planner`, etc. |
 | Browse indexed docs | `GET /library` | Optional settings / debug UI |
@@ -147,11 +148,15 @@ POST /agent
 }
 ```
 
-### Work proposals (not Cluny tasks)
+### Work proposals
 
-When Cluny suggests work, responses should be treated as **proposals** for Kosistenz to accept, edit, schedule, and pack—not as rows in Cluny’s task DB.
-
-Example shape (from agent/planner output or a future dedicated route):
+```http
+POST /propose
+{
+  "question": "What should I tackle before the product sync?",
+  "context": "Open: write agenda (Thu). Meeting: Product sync Tue 2pm."
+}
+```
 
 ```json
 {
@@ -166,21 +171,42 @@ Example shape (from agent/planner output or a future dedicated route):
 }
 ```
 
-Kosistenz creates the real to-do, assigns the **day**, and runs the packer. Cluny never assigns `14:15` vs `14:40`.
+Kosistenz creates the real to-do, assigns the **day**, and runs the packer.
+
+### Journal watch (optional)
+
+Instead of push on every save, set `CLUNY_KOSISTENZ_JOURNAL_DIR` and run:
+
+```bash
+cluny watch-kosistenz-journal
+```
+
+Cluny indexes journal files from disk into its library (Kosistenz files remain canonical).
+
+### Service at login
+
+```bash
+cluny serve-install
+# remove: cluny serve-uninstall
+```
 
 ---
 
-## Endpoints Kosistenz must not use as source of truth
+## HTTP API surface
 
-These exist for **Cluny CLI, widget, and standalone use**. They are **not** the Kosistenz integration contract. Using them as the live todo/calendar list would duplicate Kosistenz and break the week clock, weekly goals, and iPhone pack.
+Kosistenz and other clients use **`cluny serve`** brain routes only:
 
-| Endpoint | Status for Kosistenz |
-|----------|----------------------|
-| `GET/POST/PATCH/DELETE /tasks` | **Do not use** — Cluny local task store only |
-| `GET /calendar/events`, `POST /calendar/import` | **Do not use** — Kosistenz owns events |
-| `POST /context/day`, `POST /context/meeting` | **Misaligned** — built from Cluny SQLite, not Kosistenz; prefer `/chat` or `/agent` with Kosistenz-supplied context until a context API accepts Kosistenz payloads |
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/health` | Probe brain availability |
+| `POST` | `/ingest/text` | Index journal copy on save |
+| `POST` | `/search` | Retrieval only |
+| `POST` | `/chat` | Supervisor-routed Ask |
+| `POST` | `/ask` | Streaming RAG (SSE) |
+| `POST` | `/agent` | Tool loop |
+| `GET` | `/library` | Indexed documents (optional) |
 
-Sprint 11 shipped some of these routes for experimentation. **Kosistenz ignores them** per `docs/cluny-integration.md`.
+Task/calendar/context HTTP routes from Sprint 11 experiments were **removed** — Kosistenz owns those domains. Standalone Cluny still has `cluny tasks` and `cluny calendar` via CLI/widget.
 
 ---
 
@@ -261,13 +287,7 @@ Kosistenz does **not** call `/tasks` from this client.
 
 ## Service at login (optional)
 
-```bash
-cp macos/com.cluny.serve.plist ~/Library/LaunchAgents/
-# Edit ProgramArguments to your run_cluny.sh path
-launchctl load ~/Library/LaunchAgents/com.cluny.serve.plist
-```
-
-Kosistenz does not depend on this; it only enables Ask/search when the user wants the brain.
+See **Journal watch** and **`cluny serve-install`** above. Kosistenz does not depend on this.
 
 ---
 

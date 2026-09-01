@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 from pathlib import Path
 
 import typer
@@ -300,10 +301,12 @@ def watch(
     root = directory
     if root is None:
         raw = os.environ.get("CLUNY_WATCH_PATH", "").strip()
+        if not raw:
+            raw = os.environ.get("CLUNY_KOSISTENZ_JOURNAL_DIR", "").strip()
         root = Path(raw).expanduser() if raw else None
     if root is None:
         typer.echo(
-            "Pass a DIRECTORY or set CLUNY_WATCH_PATH in the environment.",
+            "Pass a DIRECTORY, or set CLUNY_WATCH_PATH or CLUNY_KOSISTENZ_JOURNAL_DIR.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -1083,6 +1086,59 @@ def calendar_list() -> None:
     for e in events:
         when = e.start_at or "?"
         typer.echo(f"{when}  {e.summary}")
+
+
+@app.command("watch-kosistenz-journal")
+def watch_kosistenz_journal(
+    debounce: float = typer.Option(1.5, "--debounce", "-d", min=0.2),
+    chunk_size: int = typer.Option(1200),
+    overlap: int = typer.Option(200),
+) -> None:
+    """Watch CLUNY_KOSISTENZ_JOURNAL_DIR and index journal files into Cluny."""
+    settings = Settings.from_env()
+    if settings.kosistenz_journal_dir is None:
+        typer.echo("Set CLUNY_KOSISTENZ_JOURNAL_DIR in .env first.", err=True)
+        raise typer.Exit(code=1)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    typer.echo(f"Watching Kosistenz journal dir: {settings.kosistenz_journal_dir}")
+    try:
+        watch_directory(
+            settings.kosistenz_journal_dir,
+            settings,
+            debounce_sec=debounce,
+            chunk_size=chunk_size,
+            overlap=overlap,
+        )
+    except (FileNotFoundError, RuntimeError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+
+
+@app.command("serve-install")
+def serve_install(
+    force: bool = typer.Option(False, "--force", help="Replace existing LaunchAgent."),
+) -> None:
+    """Install macOS LaunchAgent to run `cluny serve` at login."""
+    from cluny.launch_agent import install_launch_agent
+
+    try:
+        path = install_launch_agent(force=force)
+    except (FileExistsError, FileNotFoundError, RuntimeError, subprocess.SubprocessError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    typer.echo(f"Installed LaunchAgent: {path}")
+    typer.echo("Logs: /tmp/cluny-serve.log and /tmp/cluny-serve.err")
+
+
+@app.command("serve-uninstall")
+def serve_uninstall() -> None:
+    """Remove macOS LaunchAgent for cluny serve."""
+    from cluny.launch_agent import uninstall_launch_agent
+
+    if not uninstall_launch_agent():
+        typer.echo("LaunchAgent not installed.")
+        raise typer.Exit(code=0)
+    typer.echo("Removed com.cluny.serve LaunchAgent.")
 
 
 @app.command()

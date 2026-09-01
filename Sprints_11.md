@@ -86,11 +86,9 @@ flowchart LR
 | Integration doc (brain-only) | ✓ | `INTEGRATION.md` |
 | Kosistenz handoff pointer | ✓ | links to `docs/cluny-integration.md` |
 | Brain HTTP surface | ✓ | `cluny/api.py` |
-| Legacy route deprecation | ✓ | `deprecated=True`, middleware headers |
-| Context helpers (CLI legacy) | ✓ | `cluny/context.py` — not Kosistenz contract |
-| `external_id` on tasks DB | ✓ | `cluny/tasks_db.py` — CLI/legacy HTTP only |
+| Legacy HTTP routes removed | ✓ | `/tasks`, `/calendar`, `/context` dropped from API |
 | LaunchAgent | ✓ | `macos/com.cluny.serve.plist` |
-| Tests | ✓ | `tests/test_api_integration.py`, `tests/test_api_legacy.py` |
+| Tests | ✓ | `tests/test_api_integration.py` |
 
 ---
 
@@ -110,15 +108,7 @@ flowchart LR
 
 Pass Kosistenz state (deadlines, goals, meeting title) **in the question** until a structured context API exists.
 
-### Legacy (CLI / scripts — not Kosistenz)
-
-| Method | Path | Notes |
-|--------|------|-------|
-| `GET/POST/PATCH/DELETE` | `/tasks`… | `tasks.sqlite`; deprecated |
-| `GET/POST` | `/calendar/…` | `calendar.sqlite`; deprecated |
-| `POST` | `/context/day`, `/context/meeting` | Built from Cluny SQLite; deprecated |
-
----
+Standalone Cluny task/calendar features use **CLI only** (`cluny tasks`, `cluny calendar`) — not HTTP.
 
 ## Example flows
 
@@ -152,8 +142,8 @@ Cluny agent/planner may return suggestions; Kosistenz owns creation and scheduli
 ## Acceptance criteria
 
 - `INTEGRATION.md` matches Kosistenz `docs/cluny-integration.md` intent.
-- Kosistenz can use Cluny for health, ingest, search, chat — **without** task/calendar REST.
-- Legacy routes remain for CLI compatibility but are marked deprecated in OpenAPI and response headers.
+- Kosistenz can use Cluny for health, ingest, search, chat — **without** task/calendar HTTP.
+- Legacy task/calendar HTTP routes removed; CLI paths unchanged.
 - CI green.
 
 ---

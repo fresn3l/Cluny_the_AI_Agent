@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QRunnable, Signal
 
+from cluny.brain_client import chat_brain, ingest_text_brain
 from cluny.config import Settings
-from cluny.documents import add_inline_text
-from cluny.ollama_client import OllamaClient
-from cluny.store import get_collection
-from cluny.supervisor import run_chat
 from cluny.tasks_db import connect as tasks_connect, create_task
 from cluny.widget.glance import build_glance_summary, format_glance_text
 
@@ -27,7 +24,7 @@ class ChatWorker(QRunnable):
     def run(self) -> None:
         try:
             settings = Settings.load()
-            result = run_chat(self._question, settings=settings)
+            result = chat_brain(self._question, settings=settings)
             body = result.answer
             if result.tool_calls:
                 body = "Tools: " + "; ".join(result.tool_calls) + "\n\n" + body
@@ -47,17 +44,13 @@ class CaptureWorker(QRunnable):
     def run(self) -> None:
         try:
             settings = Settings.load()
-            collection = get_collection(settings)
-            ollama = OllamaClient(settings)
-            result = add_inline_text(
-                settings,
-                collection,
-                ollama,
+            count, unchanged = ingest_text_brain(
                 self._text,
-                source_label=self._source,
+                settings=settings,
+                source=self._source,
             )
-            msg = f"Indexed {result.chunk_count} chunk(s)."
-            if result.unchanged:
+            msg = f"Indexed {count} chunk(s)."
+            if unchanged:
                 msg = "Unchanged (already indexed)."
             self.signals.finished.emit(msg)
         except Exception as e:  # noqa: BLE001

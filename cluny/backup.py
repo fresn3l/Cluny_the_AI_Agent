@@ -9,6 +9,21 @@ from pathlib import Path
 
 from cluny.config import Settings
 
+_AUX_DB_NAMES = ("tasks.sqlite", "calendar.sqlite", "sessions.sqlite")
+
+
+def _auxiliary_paths(data_dir: Path) -> list[tuple[Path, str]]:
+    """Local files under data_dir to include in backups."""
+    out: list[tuple[Path, str]] = []
+    for name in _AUX_DB_NAMES:
+        p = data_dir / name
+        if p.is_file():
+            out.append((p, name))
+    uc = data_dir / "user_config.json"
+    if uc.is_file():
+        out.append((uc, "user_config.json"))
+    return out
+
 
 def export_data(
     out_path: Path,
@@ -18,7 +33,7 @@ def export_data(
     password: str | None = None,
 ) -> Path:
     """
-    Create a zip archive of library.sqlite, chroma/, and optional managed files/.
+    Create a zip archive of library.sqlite, chroma/, auxiliary DBs, and optional files/.
     When password is set, uses AES encryption (requires pyzipper).
     Returns the path to the created archive.
     """
@@ -38,6 +53,7 @@ def export_data(
         f"CLUNY_DATA_DIR={data_dir}\n"
         f"CLUNY_CATALOG_DIR={settings.catalog_dir_name}\n"
         f"CLUNY_LIBRARY_SQLITE={settings.library_sqlite_name}\n"
+        f"AUX_DBS={','.join(_AUX_DB_NAMES)}\n"
     )
 
     if password:
@@ -68,6 +84,8 @@ def export_data(
             for f in files_dir.rglob("*"):
                 if f.is_file():
                     zf.write(f, arcname=str(Path("library/files") / f.relative_to(files_dir)))
+        for path, arcname in _auxiliary_paths(data_dir):
+            zf.write(path, arcname=arcname)
         zf.writestr("MANIFEST.txt", manifest)
 
     return out
