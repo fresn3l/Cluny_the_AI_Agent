@@ -125,13 +125,16 @@ flowchart TB
 ### D — Live preview
 
 - [x] “Run preview” strip with sample question (uses active prompt tab, unsaved text)
-- [ ] Sample question presets dropdown (optional)
+- [x] Sample question presets dropdown
 
 ### E — Polish + docs
 
 - [x] Packaged app: Brain Editor uses `/brain/config` when `CLUNY_BRAIN_URL` is set
-- [ ] README section: Brain Editor
-- [ ] Export/import `brain_config.json`
+- [x] README section: Brain Editor + export/import
+- [x] Export/import `brain_config.json` (GUI, CLI, validation)
+- [x] Sprint 17 plan for Kosistenz integration → [`SPRINT_17.md`](SPRINT_17.md)
+
+**Sprint 16 complete.** Next: Kosistenz integration (Phase A).
 
 ---
 

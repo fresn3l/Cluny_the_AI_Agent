@@ -57,12 +57,14 @@ tasks_app = typer.Typer(help="Manage tasks (separate from knowledge index).")
 collection_app = typer.Typer(help="Organize documents into collections.")
 calendar_app = typer.Typer(help="Read-only calendar from imported ICS files.")
 backup_app = typer.Typer(help="Backup and restore data snapshots.")
+brain_app = typer.Typer(help="Export and import Cluny brain instructions.")
 app.add_typer(library_app, name="library")
 app.add_typer(tag_app, name="tag")
 app.add_typer(tasks_app, name="tasks")
 app.add_typer(collection_app, name="collection")
 app.add_typer(calendar_app, name="calendar")
 app.add_typer(backup_app, name="backup")
+app.add_typer(brain_app, name="brain")
 
 
 def _echo_index_result(n: int, doc_id: str, unchanged: bool) -> None:
@@ -712,6 +714,38 @@ def import_data(
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e
     typer.echo(f"Restored from {archive} into {settings.data_dir}")
+
+
+@brain_app.command("export")
+def brain_export(
+    path: Path = typer.Argument(..., help="Destination JSON file (e.g. brain_config.json)."),
+) -> None:
+    """Export brain_config.json (editable instructions) to a file."""
+    from cluny.brain_config import export_brain_config_to_path
+
+    settings = Settings.load()
+    try:
+        out = export_brain_config_to_path(settings, path)
+    except OSError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    typer.echo(f"Exported brain config to {out}")
+
+
+@brain_app.command("import")
+def brain_import(
+    path: Path = typer.Argument(..., help="brain_config.json to load."),
+) -> None:
+    """Import brain_config.json into CLUNY_DATA_DIR."""
+    from cluny.brain_config import import_brain_config_from_path
+
+    settings = Settings.load()
+    try:
+        import_brain_config_from_path(settings, path)
+    except (FileNotFoundError, OSError, ValueError) as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    typer.echo(f"Imported brain config from {path}")
 
 
 @app.command()

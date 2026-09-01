@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -23,11 +27,15 @@ from PySide6.QtWidgets import (
 
 from cluny.brain_config import (
     DEFAULT_PROMPTS,
-    PROMPT_KEYS,
+    PREVIEW_QUESTION_PRESETS,
     PROMPT_LABELS,
+    BrainBehavior,
     BrainConfig,
+    BrainPromptOverrides,
     apply_config_update,
     editor_text_for_prompt,
+    export_brain_config_to_path,
+    import_brain_config_from_path,
     load_brain_config,
     override_from_editor,
     reset_brain_config,
@@ -169,10 +177,17 @@ class BrainEditorDialog(QDialog):
         self._tabs.addTab(models, "Models")
 
         preview_row = QHBoxLayout()
-        preview_row.addWidget(QLabel("Test question:"))
+        preview_row.addWidget(QLabel("Preset:"))
+        self._preview_preset = QComboBox()
+        self._preview_preset.addItem("(custom)", "")
+        for q in PREVIEW_QUESTION_PRESETS:
+            self._preview_preset.addItem(q[:48] + ("…" if len(q) > 48 else ""), q)
+        self._preview_preset.currentIndexChanged.connect(self._on_preview_preset)
+        preview_row.addWidget(self._preview_preset)
+        preview_row.addWidget(QLabel("Question:"))
         self._preview_question = QLineEdit()
         self._preview_question.setPlaceholderText("e.g. Summarize how you should answer questions")
-        self._preview_question.setText("How should you answer questions from my notes?")
+        self._preview_question.setText(PREVIEW_QUESTION_PRESETS[0])
         preview_row.addWidget(self._preview_question, 1)
         self._preview_btn = QPushButton("Run preview")
         self._preview_btn.clicked.connect(self._run_preview)
@@ -186,10 +201,16 @@ class BrainEditorDialog(QDialog):
         root.addWidget(self._preview_out)
 
         btn_row = QHBoxLayout()
+        export_btn = QPushButton("Export…")
+        export_btn.clicked.connect(self._export_config)
+        import_btn = QPushButton("Import…")
+        import_btn.clicked.connect(self._import_config)
         reset_section = QPushButton("Reset section")
         reset_section.clicked.connect(self._reset_section)
         reset_all = QPushButton("Reset all")
         reset_all.clicked.connect(self._reset_all)
+        btn_row.addWidget(export_btn)
+        btn_row.addWidget(import_btn)
         btn_row.addWidget(reset_section)
         btn_row.addWidget(reset_all)
         btn_row.addStretch(1)
@@ -213,17 +234,18 @@ class BrainEditorDialog(QDialog):
                 pass
 
         self._cfg = load_brain_config(self._settings)
-        self._persona.setPlainText(self._cfg.global_persona)
-        for key, edit in self._prompt_edits.items():
-            edit.setPlainText(editor_text_for_prompt(key, self._cfg))
+        self._apply_config_to_ui(self._cfg)
 
-        mode = self._cfg.behavior.supervisor_mode
-        self._supervisor.setCurrentIndex(
-            {"llm": 1, "regex": 2}.get(mode or "", 0)
-        )
-        self._max_proposals.setValue(self._cfg.behavior.max_proposals or 0)
-        self._empty_index.setText(self._cfg.behavior.empty_index_message or "")
-        self._empty_collection.setText(self._cfg.behavior.empty_collection_message or "")
+    def _apply_config_to_ui(self, cfg: BrainConfig) -> None:
+        self._persona.setPlainText(cfg.global_persona)
+        for key, edit in self._prompt_edits.items():
+            edit.setPlainText(editor_text_for_prompt(key, cfg))
+
+        mode = cfg.behavior.supervisor_mode
+        self._supervisor.setCurrentIndex({"llm": 1, "regex": 2}.get(mode or "", 0))
+        self._max_proposals.setValue(cfg.behavior.max_proposals or 0)
+        self._empty_index.setText(cfg.behavior.empty_index_message or "")
+        self._empty_collection.setText(cfg.behavior.empty_collection_message or "")
 
         self._chat_model.setText(self._user_config.chat_model)
         self._embed_model.setText(self._user_config.embed_model)
@@ -314,6 +336,70 @@ class BrainEditorDialog(QDialog):
             "empty_index_message": self._empty_index.text().strip() or None,
             "empty_collection_message": self._empty_collection.text().strip() or None,
         }
+
+    def _collect_brain_config(self) -> BrainConfig:
+        return BrainConfig(
+            global_persona=self._persona.toPlainText().strip(),
+            prompts=BrainPromptOverrides.from_dict(self._collect_prompts()),
+            behavior=BrainBehavior.from_dict(self._collect_behavior()),
+        )
+
+    @Slot(int)
+    def _on_preview_preset(self, index: int) -> None:
+        text = self._preview_preset.itemData(index)
+        if text:
+            self._preview_question.setText(str(text))
+
+    @Slot()
+    def _export_config(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export brain config",
+            "brain_config.json",
+            "JSON files (*.json)",
+        )
+        if not path:
+            return
+        try:
+            data = self._collect_brain_config().to_dict()
+            Path(path).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            QMessageBox.information(self, "Exported", f"Brain config saved to:\n{path}")
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+
+    @Slot()
+    def _import_config(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import brain config",
+            "",
+            "JSON files (*.json)",
+        )
+        if not path:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Import brain config",
+            "Replace the current editor contents with the imported file? "
+            "Click Save to persist to your data directory.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            from cluny.brain_config import validate_brain_config_dict
+
+            cfg = validate_brain_config_dict(data)
+            self._cfg = cfg
+            self._apply_config_to_ui(cfg)
+            QMessageBox.information(
+                self,
+                "Imported",
+                "Config loaded into the editor. Click Save to apply permanently.",
+            )
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            QMessageBox.warning(self, "Import failed", str(exc))
 
     @Slot()
     def _save(self) -> None:
@@ -406,6 +492,58 @@ class BrainEditorDialog(QDialog):
             QMessageBox.warning(self, "Reset failed", str(exc))
             return
         self._load_from_config()
+
+
+def export_brain_config_dialog(parent: QWidget | None = None) -> bool:
+    """Export saved brain_config.json to a user-chosen file."""
+    settings = Settings.load()
+    path, _ = QFileDialog.getSaveFileName(
+        parent,
+        "Export brain config",
+        "brain_config.json",
+        "JSON files (*.json)",
+    )
+    if not path:
+        return False
+    try:
+        export_brain_config_to_path(settings, Path(path))
+        QMessageBox.information(parent, "Exported", f"Brain config saved to:\n{path}")
+        return True
+    except OSError as exc:
+        QMessageBox.warning(parent, "Export failed", str(exc))
+        return False
+
+
+def import_brain_config_dialog(parent: QWidget | None = None) -> bool:
+    """Import brain_config.json from disk into CLUNY_DATA_DIR."""
+    settings = Settings.load()
+    path, _ = QFileDialog.getOpenFileName(
+        parent,
+        "Import brain config",
+        "",
+        "JSON files (*.json)",
+    )
+    if not path:
+        return False
+    reply = QMessageBox.question(
+        parent,
+        "Import brain config",
+        "Replace your saved brain config with this file?",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+    )
+    if reply != QMessageBox.StandardButton.Yes:
+        return False
+    try:
+        import_brain_config_from_path(settings, Path(path))
+        QMessageBox.information(
+            parent,
+            "Imported",
+            "Brain config imported. Changes apply to the next message.",
+        )
+        return True
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        QMessageBox.warning(parent, "Import failed", str(exc))
+        return False
 
 
 def open_brain_editor(parent: QWidget | None = None) -> bool:

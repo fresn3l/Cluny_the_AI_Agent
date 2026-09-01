@@ -169,6 +169,15 @@ For dev, match packaged HTTP mode without py2app: `CLUNY_USE_HTTP_BRAIN=1 cluny 
 
 **Brain Editor:** **Brain → Edit instructions…** in the full GUI edits Cluny's system prompts, global persona, routing behavior, and models. Saved to `brain_config.json` under your data dir; changes apply on the next message. Use **Run preview** to test unsaved prompt text against Ollama.
 
+**Export / import:** **Brain → Export/Import brain config…** in the GUI, or:
+
+```bash
+cluny brain export ~/Desktop/brain_config.json
+cluny brain import ~/Desktop/brain_config.json
+```
+
+Share or back up your instruction overrides without copying the whole `.cluny` folder.
+
 | Surface | Best for |
 |---------|----------|
 | **Widget** | Quick ask, paste capture, add task, glance at stats |

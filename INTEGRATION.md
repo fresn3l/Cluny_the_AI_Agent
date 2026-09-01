@@ -289,6 +289,9 @@ Kosistenz and other clients use **`cluny serve`** brain routes only:
 | `POST` | `/propose` | Work proposals from question + context |
 | `POST` | `/agent` | Tool loop |
 | `GET` | `/library` | Indexed documents (optional) |
+| `GET` | `/brain/config` | Effective brain instructions (prompts + behavior) |
+| `PUT` | `/brain/config` | Save `brain_config.json` overrides |
+| `POST` | `/brain/config/reset` | Reset prompts/behavior/persona |
 
 Task/calendar/context HTTP routes from Sprint 11 experiments were **removed** — Kosistenz owns those domains. Standalone Cluny still has `cluny tasks` and `cluny calendar` via CLI/widget.
 

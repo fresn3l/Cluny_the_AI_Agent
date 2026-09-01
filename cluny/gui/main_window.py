@@ -36,7 +36,11 @@ from cluny.agent import run_agent
 from cluny.brain_client import BrainClient, chat_brain
 from cluny.config import Settings
 from cluny.documents import add_file
-from cluny.gui.brain_editor import open_brain_editor
+from cluny.gui.brain_editor import (
+    export_brain_config_dialog,
+    import_brain_config_dialog,
+    open_brain_editor,
+)
 from cluny.library_db import (
     connect,
     document_count,
@@ -519,6 +523,12 @@ class MainWindow(QMainWindow):
         edit_brain = QAction("&Edit instructions…", self)
         edit_brain.triggered.connect(self._open_brain_editor)
         brain_menu.addAction(edit_brain)
+        export_brain = QAction("&Export brain config…", self)
+        export_brain.triggered.connect(self._export_brain_config)
+        brain_menu.addAction(export_brain)
+        import_brain = QAction("&Import brain config…", self)
+        import_brain.triggered.connect(self._import_brain_config)
+        brain_menu.addAction(import_brain)
 
         help_menu = bar.addMenu("&Help")
         about = QAction("&About Cluny", self)
@@ -621,6 +631,14 @@ class MainWindow(QMainWindow):
                 "Brain config saved",
                 "Instruction changes apply to the next message.",
             )
+
+    def _export_brain_config(self) -> None:
+        export_brain_config_dialog(self)
+
+    def _import_brain_config(self) -> None:
+        if import_brain_config_dialog(self):
+            self._user_config = load_user_config(self._settings)
+            self._k_spin.setValue(self._user_config.retrieval_k)
 
     def _build_input_row(self) -> QWidget:
         wrap = QFrame()

@@ -432,3 +432,66 @@ def reset_brain_config(
     save_brain_config(settings, cfg)
     return cfg
 
+
+def validate_brain_config_dict(data: dict[str, Any]) -> BrainConfig:
+    """Parse and validate imported brain_config.json."""
+    if not isinstance(data, dict):
+        raise ValueError("Config must be a JSON object")
+    prompts = data.get("prompts")
+    if prompts is not None:
+        if not isinstance(prompts, dict):
+            raise ValueError("prompts must be an object")
+        for key in prompts:
+            if key not in PROMPT_KEYS:
+                raise ValueError(f"Unknown prompt key: {key}")
+    behavior = data.get("behavior")
+    if behavior is not None:
+        if not isinstance(behavior, dict):
+            raise ValueError("behavior must be an object")
+        mode = behavior.get("supervisor_mode")
+        if mode is not None and mode not in ("llm", "regex"):
+            raise ValueError("supervisor_mode must be llm or regex")
+    return BrainConfig.from_dict(data)
+
+
+def export_brain_config_dict(settings: Settings) -> dict[str, Any]:
+    """Export stored brain_config.json contents (overrides only, not merged defaults)."""
+    return load_brain_config(settings).to_dict()
+
+
+def export_brain_config_to_path(settings: Settings, path: Path) -> Path:
+    """Write brain_config.json to a user-chosen path."""
+    path = path.expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(export_brain_config_dict(settings), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def import_brain_config(settings: Settings, data: dict[str, Any]) -> BrainConfig:
+    """Validate and replace brain_config.json from imported data."""
+    cfg = validate_brain_config_dict(data)
+    save_brain_config(settings, cfg)
+    return cfg
+
+
+def import_brain_config_from_path(settings: Settings, path: Path) -> BrainConfig:
+    """Load brain_config.json from a file into CLUNY_DATA_DIR."""
+    path = path.expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Config file must contain a JSON object")
+    return import_brain_config(settings, data)
+
+
+PREVIEW_QUESTION_PRESETS: tuple[str, ...] = (
+    "How should you answer questions from my notes?",
+    "What patterns do you see in my journals?",
+    "Suggest work I should prioritize this week.",
+    "How concise should your answers be?",
+    "What should you never do when proposing tasks?",
+)
