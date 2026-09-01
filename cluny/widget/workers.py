@@ -85,10 +85,17 @@ class ChatStreamWorker(QRunnable):
 
 
 class ProposeWorker(QRunnable):
-    def __init__(self, question: str, *, context: str | None = None) -> None:
+    def __init__(
+        self,
+        question: str,
+        *,
+        context: str | None = None,
+        collection: str | None = None,
+    ) -> None:
         super().__init__()
         self._question = question
         self._context = context
+        self._collection = collection
         self.signals = WorkerSignals()
 
     def run(self) -> None:
@@ -98,7 +105,11 @@ class ProposeWorker(QRunnable):
             if client is None:
                 self.signals.error.emit("Brain HTTP client not configured (set CLUNY_BRAIN_URL).")
                 return
-            proposals = client.propose(self._question, context=self._context)
+            proposals = client.propose(
+                self._question,
+                context=self._context,
+                collection=self._collection,
+            )
             lines: list[str] = []
             for p in proposals:
                 title = p.get("title", "")

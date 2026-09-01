@@ -17,6 +17,7 @@ from cluny.config import Settings
 from cluny.extract import ExtractionError, extract_text
 from cluny.ingest import ingest_string
 from cluny.library_db import (
+    add_doc_to_collection,
     connect,
     delete_chunks_for_doc,
     delete_document_row,
@@ -214,6 +215,7 @@ def add_inline_text(
     title: str | None = None,
     chunk_size: int = 1200,
     overlap: int = 200,
+    collection_name: str | None = None,
 ) -> IndexResult:
     """Index pasted text and register it in the catalog."""
     if not text.strip():
@@ -254,6 +256,8 @@ def add_inline_text(
 
     replace_chunks(conn, doc_id, parts)
     upsert_document(conn, doc_id, catalog_path, kind, display_title, chash, size_bytes, n)
+    if collection_name and collection_name.strip():
+        add_doc_to_collection(conn, doc_id, collection_name.strip())
     conn.close()
 
     if n == 0:

@@ -311,7 +311,7 @@ class WidgetPanel(QFrame):
             return
         self._set_busy(True)
         self._status.setText("Suggesting…")
-        worker = ProposeWorker(text)
+        worker = ProposeWorker(text, collection=self._current_collection())
         worker.signals.finished.connect(self._on_propose_done)
         worker.signals.error.connect(self._on_error)
         self._thread_pool.start(worker)

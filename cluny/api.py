@@ -46,6 +46,7 @@ class IngestTextRequest(BaseModel):
     source: str = "inline"
     catalog: bool = False
     title: str | None = None
+    collection: str | None = None
 
 
 class AgentRequest(BaseModel):
@@ -66,6 +67,8 @@ class ProposeRequest(BaseModel):
     question: str
     context: str | None = None
     context_json: KosistenzContext | None = None
+    collection: str | None = None
+    k: int = Field(default=5, ge=1, le=25)
 
 
 class TaskSyncRequest(BaseModel):
@@ -235,6 +238,7 @@ def create_app() -> FastAPI:
                     body.text,
                     source_label=body.source,
                     title=body.title,
+                    collection_name=body.collection,
                 )
                 return {
                     "doc_id": result.doc_id,
@@ -364,6 +368,8 @@ def create_app() -> FastAPI:
                 context=body.context,
                 context_json=body.context_json,
                 settings=settings,
+                collection=body.collection,
+                k=body.k,
             )
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e

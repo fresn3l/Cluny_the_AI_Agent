@@ -148,8 +148,10 @@ class BrainClient:
         *,
         context: str | None = None,
         context_json: KosistenzContext | dict | None = None,
+        collection: str | None = None,
+        k: int = 5,
     ) -> list[dict[str, Any]]:
-        payload: dict[str, Any] = {"question": question}
+        payload: dict[str, Any] = {"question": question, "k": k}
         if context:
             payload["context"] = context
         if context_json is not None:
@@ -157,6 +159,8 @@ class BrainClient:
                 payload["context_json"] = context_json.model_dump(exclude_none=True)
             else:
                 payload["context_json"] = context_json
+        if collection:
+            payload["collection"] = collection
         with httpx.Client(timeout=120.0) as client:
             r = client.post(
                 f"{self.base_url}/propose",
@@ -172,6 +176,7 @@ class BrainClient:
         *,
         source: str = "widget-capture",
         title: str | None = None,
+        collection: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "text": text,
@@ -180,6 +185,8 @@ class BrainClient:
         }
         if title:
             payload["title"] = title
+        if collection:
+            payload["collection"] = collection
         with httpx.Client(timeout=120.0) as client:
             r = client.post(
                 f"{self.base_url}/ingest/text",
