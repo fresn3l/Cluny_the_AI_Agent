@@ -220,7 +220,20 @@ cluny calendar import calendar.ics
 - Embeddings and chat go to **your machine** via Ollama.
 - Back up `CLUNY_DATA_DIR` if you care about the catalog and index.
 
+## HTTP API (Kosistenz integration)
+
+**Kosistenz is the life you live in. Cluny is the brain you ask.** Kosistenz owns the week clock, todos, calendar, journal files, and pack; Cluny provides RAG, Ask/chat/agent, and indexes a copy of journal text.
+
+```bash
+pip install -e ".[api]"
+cluny serve
+# http://127.0.0.1:8787/health  ·  /docs for OpenAPI
+```
+
+See **`INTEGRATION.md`** for the Kosistenz contract (aligned with Kosistenz `docs/cluny-integration.md`). Optional login service: `macos/com.cluny.serve.plist`.
+
 ## Docs
 
+- `INTEGRATION.md` — Kosistenz HTTP contract  
 - `Agent_goals.md` — product goals  
 - `BUILD_CHECKLIST.md` — engineering checklist  

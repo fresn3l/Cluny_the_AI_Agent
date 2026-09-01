@@ -142,14 +142,25 @@ def _row_from_sql(r: sqlite3.Row) -> EventRow:
     )
 
 
-def events_on_date(conn: sqlite3.Connection, date_str: str) -> list[EventRow]:
-    """Match events whose start_at contains the date prefix (ICS DTSTART formats)."""
+def _date_prefixes(date_str: str) -> tuple[str, ...]:
+    """ISO and compact ICS prefixes (YYYY-MM-DD and YYYYMMDD)."""
     from cluny.dates import parse_due
 
     iso = parse_due(date_str) or date_str
-    prefix = iso[:10] if len(iso) >= 10 else date_str[:10]
+    iso_prefix = iso[:10] if len(iso) >= 10 else date_str[:10]
+    compact = iso_prefix.replace("-", "")
+    if compact == iso_prefix:
+        return (iso_prefix,)
+    return (iso_prefix, compact)
+
+
+def events_on_date(conn: sqlite3.Connection, date_str: str) -> list[EventRow]:
+    """Match events whose start_at contains the date prefix (ICS DTSTART formats)."""
+    prefixes = _date_prefixes(date_str)
+    clauses = " OR ".join("start_at LIKE ?" for _ in prefixes)
+    params = tuple(f"{p}%" for p in prefixes)
     cur = conn.execute(
-        "SELECT * FROM events WHERE start_at LIKE ? ORDER BY start_at ASC",
-        (f"{prefix}%",),
+        f"SELECT * FROM events WHERE {clauses} ORDER BY start_at ASC",
+        params,
     )
     return [_row_from_sql(r) for r in cur.fetchall()]

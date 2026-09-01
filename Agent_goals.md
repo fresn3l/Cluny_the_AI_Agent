@@ -26,6 +26,23 @@ Self-hosted, customizable, aligned with “coded and customizable.”
 
 ---
 
+## Platform — Kosistenz + Cluny
+
+**Kosistenz is the life you live in. Cluny is the brain you ask.**
+
+**[Kosistenz](https://github.com/fresn3l/Kosistenz)** owns the week clock, hard events, deadline to-dos, packing, goals, workouts, journal **files**, and iPhone pack — usable even when Cluny is quit.
+
+**Cluny** (this repo) owns PDFs/notes, hybrid RAG, Ask/chat/agent, and indexing a **copy** of journal text. It may **propose** work (title, estimate, due, keyword); it never picks clock slots, never Fill week, and never maintains a second authoritative todo/calendar list for Kosistenz.
+
+| Repo | Role |
+|------|------|
+| **Kosistenz** | Daily Mac home base — scheduling, todos, journal, pack |
+| **Cluny_the_AI_Agent** | Optional local brain — `cluny serve` on localhost |
+
+Integration contract: [INTEGRATION.md](INTEGRATION.md) (aligned with Kosistenz `docs/cluny-integration.md`). Cluny widget and full GUI remain for quick capture and deep library browse alongside Kosistenz.
+
+---
+
 ## Next steps (brainstorm — second brain / knowledge)
 
 - **Integrations:** CalDAV / Google Calendar two-way sync; multi-device sync (Syncthing or manifest-based).

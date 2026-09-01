@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.cluny.serve</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/ABS/PATH/TO/Cluny_the_AI_Agent/run_cluny.sh</string>
+		<string>serve</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+	<key>StandardOutPath</key>
+	<string>/tmp/cluny-serve.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/cluny-serve.err</string>
+</dict>
+</plist>
