@@ -23,6 +23,17 @@ def app_support_dir() -> Path:
     return Path.home() / "Library" / "Application Support" / APP_SUPPORT_NAME
 
 
+def uses_http_brain() -> bool:
+    """True when UI should talk to cluny serve over HTTP (packaged or CLUNY_USE_HTTP_BRAIN)."""
+    if is_packaged_app():
+        return True
+    return os.environ.get("CLUNY_USE_HTTP_BRAIN", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 def configure_app_environment() -> None:
     """
     Set defaults for Cluny.app before Settings.load().
@@ -36,10 +47,5 @@ def configure_app_environment() -> None:
         support.mkdir(parents=True, exist_ok=True)
         os.environ.setdefault("CLUNY_DATA_DIR", str(support))
 
-    use_http = is_packaged_app() or os.environ.get("CLUNY_USE_HTTP_BRAIN", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    )
-    if use_http:
+    if uses_http_brain():
         os.environ.setdefault("CLUNY_BRAIN_URL", DEFAULT_BRAIN_URL)

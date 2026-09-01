@@ -31,11 +31,15 @@
 
 ### D — py2app ship
 - [x] `macos/setup_py2app.py` + `build_py2app.sh`
-- [ ] Full dependency bake-off on a clean Mac (manual)
-- [ ] DMG (stretch)
+- [x] `macos/py2app_options.py` — hidden imports, Qt plugins, excludes
+- [x] `macos/verify_bundle.py` — post-build import/size check
+- [x] `macos/create_dmg.sh` — drag-to-Applications DMG
+- [ ] Full dependency bake-off on a clean Mac (manual smoke test)
 
-### E — Docs
-- [ ] README “Install Cluny.app” section update
+### E — Docs / GUI
+- [x] README py2app + DMG instructions
+- [x] Full GUI (`cluny gui`) forces HTTP brain when packaged / `CLUNY_USE_HTTP_BRAIN`
+- [x] Settings UI toggle for `standalone_mode`
 
 ## Test plan
 

@@ -8,48 +8,20 @@ Usage (from repo root):
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from setuptools import setup
 
-APP = ["cluny/app_entry.py"]
-APP_NAME = "Cluny"
+_MACOS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_MACOS_DIR))
+from py2app_options import APP_NAME, PY2APP_OPTIONS  # noqa: E402
 
-OPTIONS = {
-    "argv_emulation": False,
-    "packages": [
-        "cluny",
-        "fastapi",
-        "uvicorn",
-        "httpx",
-        "pydantic",
-        "chromadb",
-        "PySide6",
-    ],
-    "includes": [
-        "uvicorn.logging",
-        "uvicorn.loops",
-        "uvicorn.loops.auto",
-        "uvicorn.protocols",
-        "uvicorn.protocols.http",
-        "uvicorn.protocols.http.auto",
-        "uvicorn.lifespan",
-        "uvicorn.lifespan.on",
-    ],
-    "plist": {
-        "CFBundleName": APP_NAME,
-        "CFBundleDisplayName": APP_NAME,
-        "CFBundleIdentifier": "com.cluny.app",
-        "CFBundleVersion": "0.2.0",
-        "CFBundleShortVersionString": "0.2.0",
-        "LSMinimumSystemVersion": "13.0",
-        "LSUIElement": True,
-        "NSHighResolutionCapable": True,
-    },
-    "resources": [],
-}
+APP = ["cluny/app_entry.py"]
 
 setup(
     name=APP_NAME,
     app=APP,
-    options={"py2app": OPTIONS},
+    options={"py2app": PY2APP_OPTIONS},
     setup_requires=["py2app"],
 )

@@ -160,9 +160,12 @@ That builds **Cluny.app** and installs it to `~/Applications/`. Launch from Spot
 pip install -e ".[api,packaging]"
 ./macos/build_py2app.sh
 open dist/Cluny.app
+./macos/create_dmg.sh   # optional: dist/Cluny.dmg with Applications shortcut
 ```
 
-For dev, match packaged HTTP mode without py2app: `CLUNY_USE_HTTP_BRAIN=1 cluny widget`.
+For dev, match packaged HTTP mode without py2app: `CLUNY_USE_HTTP_BRAIN=1 cluny widget` or `CLUNY_USE_HTTP_BRAIN=1 cluny gui`.
+
+**Settings:** File → Settings in the full window includes **Standalone mode** (menu bar Task tab vs Propose tab). Changes apply after restarting the widget.
 
 | Surface | Best for |
 |---------|----------|

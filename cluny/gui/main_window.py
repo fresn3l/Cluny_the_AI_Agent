@@ -9,6 +9,7 @@ import sys
 from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QFont, QKeyEvent, QTextOption
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -32,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from cluny.agent import run_agent
-from cluny.brain_client import chat_brain
+from cluny.brain_client import BrainClient, chat_brain
 from cluny.config import Settings
 from cluny.documents import add_file
 from cluny.library_db import (
@@ -78,6 +79,11 @@ class RagRunnable(QRunnable):
     def run(self) -> None:
         try:
             settings = Settings.load()
+            client = BrainClient.from_settings(settings)
+            if client is not None:
+                self._run_http(client)
+                return
+
             if self._agent_mode == "chat":
                 result = chat_brain(
                     self._question,
@@ -131,6 +137,46 @@ class RagRunnable(QRunnable):
             )
         except Exception as e:  # noqa: BLE001
             self.signals.error.emit(str(e))
+
+    def _run_http(self, client: BrainClient) -> None:
+        """Stream via /chat/stream when CLUNY_BRAIN_URL is set (packaged app mode)."""
+        parts: list[str] = []
+        sources: tuple[RagSource, ...] = ()
+        route = self._agent_mode
+        for event in client.chat_stream(
+            self._question,
+            collection=self._collection_name,
+        ):
+            if event == "[DONE]":
+                break
+            if not isinstance(event, dict):
+                continue
+            if "token" in event:
+                tok = str(event["token"])
+                parts.append(tok)
+                self.signals.token.emit(tok)
+            if "sources" in event:
+                raw_sources = event["sources"]
+                if isinstance(raw_sources, list):
+                    sources = tuple(
+                        RagSource(
+                            label=str(s.get("label", "")),
+                            snippet=str(s.get("snippet", "")),
+                            doc_path=s.get("doc_path"),
+                            chunk_index=s.get("chunk_index"),
+                        )
+                        for s in raw_sources
+                    )
+                    self.signals.sources.emit(sources)
+            if "route" in event:
+                route = str(event["route"])
+
+        body = "".join(parts)
+        if route != "ask":
+            body = f"[route: {route}]\n\n{body}"
+        self.signals.finished.emit(
+            RagAnswer(answer=body, sources=sources, empty_index=False)
+        )
 
 
 class IngestRunnable(QRunnable):
@@ -350,6 +396,9 @@ class _SettingsDialog(QDialog):
         self._embed.setPlainText(config.embed_model)
         self._embed.setMaximumHeight(36)
         form.addRow("Embed model", self._embed)
+        self._standalone = QCheckBox("Standalone mode (menu bar shows Task tab instead of Propose)")
+        self._standalone.setChecked(config.standalone_mode)
+        form.addRow(self._standalone)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -362,6 +411,9 @@ class _SettingsDialog(QDialog):
             retrieval_k=self._k_spin.value(),
             hybrid_vector_weight=self._hybrid.value(),
             agent_mode=self._config.agent_mode,
+            ask_collection=self._config.ask_collection,
+            standalone_mode=self._standalone.isChecked(),
+            first_run_complete=self._config.first_run_complete,
         )
 
 
@@ -550,7 +602,8 @@ class MainWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Settings saved",
-                "Settings apply to the next message.",
+                "Settings apply to the next message. "
+                "Restart the menu bar widget for standalone mode tab changes.",
             )
 
     def _build_input_row(self) -> QWidget:

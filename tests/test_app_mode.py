@@ -34,3 +34,19 @@ def test_configure_http_brain_flag(monkeypatch):
     monkeypatch.setenv("CLUNY_USE_HTTP_BRAIN", "1")
     configure_app_environment()
     assert os.environ.get("CLUNY_BRAIN_URL") == DEFAULT_BRAIN_URL
+
+
+def test_uses_http_brain_packaged(monkeypatch):
+    monkeypatch.setenv("CLUNY_PACKAGED", "1")
+    from cluny.app_mode import uses_http_brain
+
+    assert uses_http_brain() is True
+
+
+def test_uses_http_brain_dev_flag(monkeypatch):
+    monkeypatch.delenv("CLUNY_PACKAGED", raising=False)
+    monkeypatch.setenv("CLUNY_USE_HTTP_BRAIN", "yes")
+    from cluny.app_mode import uses_http_brain
+
+    assert uses_http_brain() is True
+
