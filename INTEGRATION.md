@@ -100,12 +100,12 @@ If `CLUNY_API_TOKEN` is set, send `X-Cluny-Token: …` or `Authorization: Bearer
 
 | Kosistenz need | Cluny endpoint | Notes |
 |----------------|----------------|-------|
-| Is brain up? | `GET /health` | Disable Ask / ingest if `ollama_ok` is false |
+| Is brain up? | `GET /health` | `brain_ready` + `message`; disable Ask if false |
 | Index journal on save | `POST /ingest/text` | **Copy** of entry; Kosistenz keeps canonical file |
 | Search notes | `POST /search` | Retrieval only, no LLM |
-| Ask / natural language | `POST /chat` | Optional `context` field with Kosistenz state |
+| Ask (full response) | `POST /chat` | `context`, `context_json`, optional `session_id`; returns `sources` |
+| Ask (streaming) | `POST /chat/stream` or `POST /ask` | SSE tokens + citations for typing indicator |
 | Work proposals | `POST /propose` | Structured `{ title, estimate_minutes, due, keywords }[]` |
-| Streaming answer | `POST /ask` | SSE with citations |
 | Deep tool loop | `POST /agent` | Modes: `knowledge`, `planner`, etc. |
 | Browse indexed docs | `GET /library` | Optional settings / debug UI |
 
@@ -129,14 +129,55 @@ Requires Ollama for embedding. The on-disk journal in Kosistenz remains canonica
 
 ### Ask with Kosistenz context
 
-Pass Kosistenz state **in the question** or in a future structured context field. Cluny uses it to reason; it does not read Kosistenz’s DB.
+Send Kosistenz state as free text (`context`), structured JSON (`context_json`), or both. Cluny merges them for reasoning; it does not read Kosistenz’s DB.
 
 ```http
 POST /chat
 {
-  "question": "What should I prioritize before Friday? Open deadlines: send agenda (Thu), review PR (Fri). This week’s goal: ship Kosistenz pack."
+  "question": "What should I prioritize before Friday?",
+  "context_json": {
+    "date": "2026-09-01",
+    "deadline_todos": [{ "title": "Send agenda", "due": "2026-09-04" }],
+    "events_today": [{ "title": "Product sync", "start": "14:00" }],
+    "weekly_goals": ["Ship Kosistenz pack"]
+  },
+  "session_id": null
 }
 ```
+
+Response includes citations and a session id for follow-ups:
+
+```json
+{
+  "route": "ask",
+  "answer": "Focus on the agenda before Thursday…",
+  "tool_calls": [],
+  "sources": [
+    { "label": "2026-08-28 journal", "snippet": "…", "doc_path": "…", "chunk_index": 2 }
+  ],
+  "session_id": "a1b2c3…"
+}
+```
+
+Pass `session_id` on later messages in the same widget thread; Cluny stores history in `sessions.sqlite` (Kosistenz does not need to replay the full RAG state).
+
+For a typing indicator, stream tokens:
+
+```http
+POST /chat/stream
+Accept: text/event-stream
+```
+
+Same body as `/chat`. SSE events (each line `data: …`):
+
+| Event | Payload |
+|-------|---------|
+| Meta | `{"route":"ask","session_id":"…"}` |
+| Citations | `{"sources":[…]}` |
+| Token | `{"token":" word"}` |
+| Done | `[DONE]` |
+
+`/ask` is an alias for `/chat/stream` (RAG-focused naming).
 
 For meeting prep, include the meeting title and any deadlines; Cluny returns note snippets and suggestions—not a new calendar row.
 
@@ -198,11 +239,13 @@ Kosistenz and other clients use **`cluny serve`** brain routes only:
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/health` | Probe brain availability |
+| `GET` | `/health` | Probe brain availability (`brain_ready`, `ollama_ok`) |
 | `POST` | `/ingest/text` | Index journal copy on save |
 | `POST` | `/search` | Retrieval only |
-| `POST` | `/chat` | Supervisor-routed Ask |
-| `POST` | `/ask` | Streaming RAG (SSE) |
+| `POST` | `/chat` | Supervisor-routed Ask (JSON, `sources`, `session_id`) |
+| `POST` | `/chat/stream` | Streaming Ask (SSE) |
+| `POST` | `/ask` | Alias for `/chat/stream` |
+| `POST` | `/propose` | Work proposals from question + context |
 | `POST` | `/agent` | Tool loop |
 | `GET` | `/library` | Indexed documents (optional) |
 
@@ -219,6 +262,8 @@ GET /health
 ```json
 {
   "status": "ok",
+  "brain_ready": true,
+  "message": null,
   "ollama_ok": true,
   "doc_count": 42,
   "task_count": 7,
@@ -226,13 +271,93 @@ GET /health
 }
 ```
 
+- `brain_ready` is false when Ollama is down; `message` explains why.
 - `task_count` counts **Cluny’s local** `tasks.sqlite` (CLI/widget), not Kosistenz todos.
 - If `ollama_ok` is false: Kosistenz still works; hide or disable ingest and LLM actions.
 - OpenAPI: `http://127.0.0.1:8787/docs`
 
 ---
 
-## Swift client sketch
+## Kosistenz widget (Ask panel)
+
+Ship **`clients/kosistenz/ClunyBrainClient.swift`** into the Kosistenz app. It wraps the endpoints above for the in-app “Talk to Cluny” widget.
+
+### Launch probe
+
+On Kosistenz launch, call `GET /health`. If `brain_ready` is false, show the offline state and disable Ask / ingest buttons (week clock and journal still work).
+
+### Non-streaming chat
+
+```swift
+let client = ClunyBrainClient(baseURL: URL(string: "http://127.0.0.1:8787")!)
+let health = try await client.health()
+guard health.brainReady else { /* show offline */ return }
+
+var sessionId: String? = nil
+let ctx = KosistenzContextPayload(
+    date: "2026-09-01",
+    deadlineTodos: [.init(title: "Send agenda", due: "2026-09-04")],
+    eventsToday: [.init(title: "Product sync", start: "14:00")],
+    weeklyGoals: ["Ship pack"]
+)
+let reply = try await client.chat(
+    question: "What should I focus on today?",
+    contextJSON: ctx,
+    sessionId: sessionId
+)
+sessionId = reply.sessionId
+// reply.sources → citation chips in the widget
+```
+
+### Streaming chat (typing indicator)
+
+```swift
+for try await event in client.chatStream(question: "Summarize my week", sessionId: sessionId) {
+    switch event {
+    case .meta(let route, let sid):
+        sessionId = sid
+    case .sources(let cites):
+        showCitations(cites)
+    case .token(let t):
+        appendToAnswer(t)
+    case .done:
+        break
+    }
+}
+```
+
+### Work proposals
+
+```swift
+let proposals = try await client.propose(
+    question: "Prep for product sync",
+    contextJSON: ctx
+)
+// Kosistenz creates real todos and runs the packer — Cluny only proposes
+```
+
+### Context fields
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `context` | string | Freeform Kosistenz snapshot |
+| `context_json` | object | Structured: `date`, `deadline_todos`, `events_today`, `weekly_goals`, `notes` |
+| `session_id` | string? | Omit on first message; pass back for multi-turn |
+
+Cluny merges `context` + `context_json` into the prompt. Prefer `context_json` for the widget — cleaner than string concatenation in Swift.
+
+### Errors
+
+| Code | Meaning |
+|------|---------|
+| 404 | Unknown `session_id` — start a new session |
+| 502 | Ollama unreachable |
+
+---
+
+## Swift client (reference)
+
+Full implementation: **`clients/kosistenz/ClunyBrainClient.swift`**. Minimal sketch:
 
 ```swift
 struct ClunyBrainClient {

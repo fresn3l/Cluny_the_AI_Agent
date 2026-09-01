@@ -8,14 +8,15 @@ from typing import Any
 import httpx
 
 from cluny.agent import run_agent
+from cluny.chat_service import SessionNotFoundError, api_chat, api_chat_stream_events
 from cluny.config import Settings
 from cluny.documents import add_inline_text
+from cluny.kosistenz_context import KosistenzContext
 from cluny.library_db import connect, document_count, list_documents
 from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.proposals import run_proposals
-from cluny.query import rag_answer_stream, retrieve
+from cluny.query import retrieve
 from cluny.store import get_collection
-from cluny.supervisor import run_chat
 from cluny.tasks_db import connect as tasks_connect, list_tasks
 
 try:
@@ -30,11 +31,6 @@ except ImportError as e:  # pragma: no cover
 
 class SearchRequest(BaseModel):
     query: str
-    k: int = Field(default=5, ge=1, le=50)
-
-
-class AskRequest(BaseModel):
-    question: str
     k: int = Field(default=5, ge=1, le=50)
 
 
@@ -53,11 +49,15 @@ class AgentRequest(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     context: str | None = None
+    context_json: KosistenzContext | None = None
+    session_id: str | None = None
+    k: int = Field(default=5, ge=1, le=50)
 
 
 class ProposeRequest(BaseModel):
     question: str
     context: str | None = None
+    context_json: KosistenzContext | None = None
 
 
 def _settings() -> Settings:
@@ -98,10 +98,27 @@ def _ollama_ok(settings: Settings) -> bool:
         return False
 
 
+def _brain_status(settings: Settings) -> tuple[bool, str | None]:
+    if not _ollama_ok(settings):
+        return False, "Ollama is not reachable — start Ollama for Ask and ingest."
+    return True, None
+
+
+def _sse_from_payloads(payloads) -> StreamingResponse:
+    def event_gen():
+        for payload in payloads:
+            if payload == "[DONE]":
+                yield "data: [DONE]\n\n"
+            else:
+                yield f"data: {payload}\n\n"
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Cluny API",
-        version="0.4.0",
+        version="0.5.0",
         description=(
             "Brain service for Kosistenz — RAG, Ask/chat/agent, journal index copy. "
             "Kosistenz owns week clock, todos, calendar, and journal files. "
@@ -130,10 +147,14 @@ def create_app() -> FastAPI:
             chunk_count = get_collection(settings).count()
         except Exception:  # noqa: BLE001
             pass
+        ollama_ok = _ollama_ok(settings)
+        brain_ready, message = _brain_status(settings)
         return {
             "status": "ok",
             "integration": "brain-only",
-            "ollama_ok": _ollama_ok(settings),
+            "brain_ready": brain_ready,
+            "message": message,
+            "ollama_ok": ollama_ok,
             "doc_count": doc_count,
             "task_count": task_count,
             "chunk_count": chunk_count,
@@ -160,23 +181,21 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/ask", dependencies=[Depends(_check_auth)], tags=["Brain"])
-    def ask(body: AskRequest, settings: Settings = Depends(_settings)) -> StreamingResponse:
+    def ask(body: ChatRequest, settings: Settings = Depends(_settings)) -> StreamingResponse:
         try:
-            stream, sources, empty = rag_answer_stream(body.question, k=body.k, settings=settings)
+            payloads = api_chat_stream_events(
+                body.question,
+                settings=settings,
+                context=body.context,
+                context_json=body.context_json,
+                session_id=body.session_id,
+                k=body.k,
+            )
+        except SessionNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
-
-        def event_gen():
-            if empty:
-                yield f"data: {json.dumps({'token': ''.join(stream)})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-            yield f"data: {json.dumps({'sources': [s.label for s in sources]})}\n\n"
-            for token in stream:
-                yield f"data: {json.dumps({'token': token})}\n\n"
-            yield "data: [DONE]\n\n"
-
-        return StreamingResponse(event_gen(), media_type="text/event-stream")
+        return _sse_from_payloads(payloads)
 
     @app.post("/ingest/text", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def ingest_text(body: IngestTextRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
@@ -243,10 +262,34 @@ def create_app() -> FastAPI:
     @app.post("/chat", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def chat(body: ChatRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         try:
-            result = run_chat(body.question, settings=settings, context=body.context)
+            return api_chat(
+                body.question,
+                settings=settings,
+                context=body.context,
+                context_json=body.context_json,
+                session_id=body.session_id,
+            )
+        except SessionNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
-        return {"route": result.route, "answer": result.answer, "tool_calls": result.tool_calls}
+
+    @app.post("/chat/stream", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def chat_stream(body: ChatRequest, settings: Settings = Depends(_settings)) -> StreamingResponse:
+        try:
+            payloads = api_chat_stream_events(
+                body.question,
+                settings=settings,
+                context=body.context,
+                context_json=body.context_json,
+                session_id=body.session_id,
+                k=body.k,
+            )
+        except SessionNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except OllamaError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        return _sse_from_payloads(payloads)
 
     @app.post("/propose", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def propose(body: ProposeRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
@@ -254,6 +297,7 @@ def create_app() -> FastAPI:
             proposals = run_proposals(
                 body.question,
                 context=body.context,
+                context_json=body.context_json,
                 settings=settings,
             )
         except OllamaError as e:

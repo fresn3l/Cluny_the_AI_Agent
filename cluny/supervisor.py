@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal
 
 from cluny.agent import run_agent
 from cluny.config import Settings
+from cluny.kosistenz_context import KosistenzContext, merge_context
 from cluny.ollama_client import OllamaClient
-from cluny.query import rag_answer
+from cluny.query import RagSource, rag_answer, rag_answer_stream
 
 Route = Literal["ask", "knowledge_agent", "tasks_agent", "calendar", "planner"]
 
@@ -39,10 +41,36 @@ ROUTER_SYSTEM = (
 
 
 @dataclass(frozen=True)
+class SourceCitation:
+    label: str
+    snippet: str
+    doc_path: str | None = None
+    chunk_index: int | None = None
+
+    @classmethod
+    def from_rag(cls, s: RagSource) -> SourceCitation:
+        return cls(
+            label=s.label,
+            snippet=s.snippet,
+            doc_path=s.doc_path,
+            chunk_index=s.chunk_index,
+        )
+
+    def to_dict(self) -> dict[str, str | int | None]:
+        return {
+            "label": self.label,
+            "snippet": self.snippet,
+            "doc_path": self.doc_path,
+            "chunk_index": self.chunk_index,
+        }
+
+
+@dataclass(frozen=True)
 class SupervisorResult:
     route: Route
     answer: str
     tool_calls: list[str]
+    sources: tuple[SourceCitation, ...] = ()
 
 
 def classify_intent_regex(question: str) -> Route:
@@ -77,25 +105,44 @@ def classify_intent(question: str, settings: Settings | None = None) -> Route:
     return classify_intent_llm(question, settings)
 
 
-def format_chat_question(question: str, context: str | None = None) -> str:
-    """Merge Kosistenz-supplied context into a single user message."""
+def format_chat_question(
+    question: str,
+    context: str | None = None,
+    *,
+    context_json: KosistenzContext | dict | None = None,
+    history_prefix: str | None = None,
+) -> str:
+    """Merge Kosistenz-supplied context and optional session history."""
     q = question.strip()
-    if not context or not context.strip():
-        return q
-    return f"Context from Kosistenz:\n{context.strip()}\n\nQuestion:\n{q}"
+    merged_ctx = merge_context(context=context, context_json=context_json)
+    if merged_ctx:
+        q = f"Context from Kosistenz:\n{merged_ctx}\n\nQuestion:\n{q}"
+    if history_prefix:
+        q = history_prefix + q
+    return q
+
+
+def _result_from_rag(route: Route, rag) -> SupervisorResult:
+    return SupervisorResult(
+        route=route,
+        answer=rag.answer,
+        tool_calls=[],
+        sources=tuple(SourceCitation.from_rag(s) for s in rag.sources),
+    )
 
 
 def _calendar_answer(settings: Settings, question: str) -> SupervisorResult:
     if settings.kosistenz_journal_dir:
         rag = rag_answer(question, settings=settings)
+        prefix = (
+            "Calendar and scheduling live in Kosistenz. Include events and deadlines "
+            "in your message — answering from that context and indexed notes.\n\n"
+        )
         return SupervisorResult(
             route="calendar",
-            answer=(
-                "Calendar and scheduling live in Kosistenz. Include events and deadlines "
-                "in your message — answering from that context and indexed notes.\n\n"
-                + rag.answer
-            ),
+            answer=prefix + rag.answer,
             tool_calls=[],
+            sources=tuple(SourceCitation.from_rag(s) for s in rag.sources),
         )
     try:
         from cluny.calendar_db import connect as cal_connect, list_upcoming
@@ -132,9 +179,16 @@ def run_chat(
     *,
     settings: Settings | None = None,
     context: str | None = None,
+    context_json: KosistenzContext | dict | None = None,
+    history_prefix: str | None = None,
 ) -> SupervisorResult:
     settings = settings or Settings.load()
-    merged = format_chat_question(question, context)
+    merged = format_chat_question(
+        question,
+        context,
+        context_json=context_json,
+        history_prefix=history_prefix,
+    )
     route = classify_intent(merged, settings)
 
     if route == "calendar":
@@ -152,5 +206,45 @@ def run_chat(
         result = run_agent(merged, settings=settings, mode="knowledge")
         return SupervisorResult(route=route, answer=result.answer, tool_calls=result.tool_calls)
 
-    rag = rag_answer(merged, settings=settings)
-    return SupervisorResult(route="ask", answer=rag.answer, tool_calls=[])
+    return _result_from_rag("ask", rag_answer(merged, settings=settings))
+
+
+def run_chat_stream(
+    question: str,
+    *,
+    settings: Settings | None = None,
+    context: str | None = None,
+    context_json: KosistenzContext | dict | None = None,
+    history_prefix: str | None = None,
+    k: int = 5,
+) -> tuple[Route, Iterator[str], tuple[SourceCitation, ...], bool]:
+    """
+    Stream tokens for ask/calendar RAG routes; non-stream routes yield one chunk.
+    Returns (route, token_iterator, sources, empty_index).
+    """
+    settings = settings or Settings.load()
+    merged = format_chat_question(
+        question,
+        context,
+        context_json=context_json,
+        history_prefix=history_prefix,
+    )
+    route = classify_intent(merged, settings)
+
+    if route in ("ask", "calendar") and (route == "ask" or settings.kosistenz_journal_dir):
+        stream, sources, empty = rag_answer_stream(merged, k=k, settings=settings)
+        cites = tuple(SourceCitation.from_rag(s) for s in sources)
+        return route, stream, cites, empty
+
+    result = run_chat(
+        question,
+        settings=settings,
+        context=context,
+        context_json=context_json,
+        history_prefix=history_prefix,
+    )
+
+    def _once() -> Iterator[str]:
+        yield result.answer
+
+    return result.route, _once(), result.sources, False

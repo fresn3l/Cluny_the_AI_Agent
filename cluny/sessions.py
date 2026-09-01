@@ -121,3 +121,18 @@ def list_messages(conn: sqlite3.Connection, session_id: str) -> list[MessageRow]
         (session_id,),
     )
     return [MessageRow(str(r[0]), str(r[1]), str(r[2])) for r in cur.fetchall()]
+
+
+def get_session(conn: sqlite3.Connection, session_id: str) -> str | None:
+    cur = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+    row = cur.fetchone()
+    return str(row[0]) if row else None
+
+
+def session_history_prefix(messages: list[MessageRow], *, max_turns: int = 6) -> str:
+    """Format recent turns for inclusion in the chat prompt."""
+    recent = messages[-max_turns:]
+    if not recent:
+        return ""
+    lines = [f"{m.role}: {m.content}" for m in recent]
+    return "Previous conversation:\n" + "\n".join(lines) + "\n\n"

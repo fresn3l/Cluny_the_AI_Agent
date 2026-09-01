@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from cluny.config import Settings
-from cluny.supervisor import SupervisorResult
+from cluny.kosistenz_context import KosistenzContext
+from cluny.supervisor import SourceCitation, SupervisorResult
 
 
 @dataclass(frozen=True)
@@ -23,8 +26,10 @@ class BrainClient:
             return None
         return cls(base_url=raw.rstrip("/"), token=settings.api_token)
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, *, accept_sse: bool = False) -> dict[str, str]:
         h = {"Content-Type": "application/json"}
+        if accept_sse:
+            h["Accept"] = "text/event-stream"
         if self.token:
             h["X-Cluny-Token"] = self.token
         return h
@@ -35,10 +40,58 @@ class BrainClient:
             r.raise_for_status()
             return r.json()
 
-    def chat(self, question: str, *, context: str | None = None) -> SupervisorResult:
+    def _chat_payload(
+        self,
+        question: str,
+        *,
+        context: str | None = None,
+        context_json: KosistenzContext | dict | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {"question": question}
         if context:
             payload["context"] = context
+        if context_json is not None:
+            if isinstance(context_json, KosistenzContext):
+                payload["context_json"] = context_json.model_dump(exclude_none=True)
+            else:
+                payload["context_json"] = context_json
+        if session_id:
+            payload["session_id"] = session_id
+        return payload
+
+    def _parse_chat_response(self, data: dict[str, Any]) -> SupervisorResult:
+        sources = tuple(
+            SourceCitation(
+                label=str(s.get("label", "")),
+                snippet=str(s.get("snippet", "")),
+                doc_path=s.get("doc_path"),
+                chunk_index=s.get("chunk_index"),
+            )
+            for s in data.get("sources") or []
+        )
+        return SupervisorResult(
+            route=data.get("route", "ask"),  # type: ignore[arg-type]
+            answer=str(data.get("answer", "")),
+            tool_calls=list(data.get("tool_calls") or []),
+            sources=sources,
+        )
+
+    def chat(
+        self,
+        question: str,
+        *,
+        context: str | None = None,
+        context_json: KosistenzContext | dict | None = None,
+        session_id: str | None = None,
+    ) -> tuple[SupervisorResult, str]:
+        """Returns (result, session_id)."""
+        payload = self._chat_payload(
+            question,
+            context=context,
+            context_json=context_json,
+            session_id=session_id,
+        )
         with httpx.Client(timeout=120.0) as client:
             r = client.post(
                 f"{self.base_url}/chat",
@@ -47,11 +100,64 @@ class BrainClient:
             )
             r.raise_for_status()
             data = r.json()
-        return SupervisorResult(
-            route=data.get("route", "ask"),  # type: ignore[arg-type]
-            answer=str(data.get("answer", "")),
-            tool_calls=list(data.get("tool_calls") or []),
+        sid = str(data.get("session_id", session_id or ""))
+        return self._parse_chat_response(data), sid
+
+    def chat_stream(
+        self,
+        question: str,
+        *,
+        context: str | None = None,
+        context_json: KosistenzContext | dict | None = None,
+        session_id: str | None = None,
+    ) -> Iterator[dict[str, Any] | str]:
+        """Yield parsed SSE payloads: meta dict, sources dict, token dict, then '[DONE]'."""
+        payload = self._chat_payload(
+            question,
+            context=context,
+            context_json=context_json,
+            session_id=session_id,
         )
+        with httpx.Client(timeout=120.0) as client:
+            with client.stream(
+                "POST",
+                f"{self.base_url}/chat/stream",
+                json=payload,
+                headers=self._headers(accept_sse=True),
+            ) as r:
+                r.raise_for_status()
+                for line in r.iter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    chunk = line[6:]
+                    if chunk == "[DONE]":
+                        yield "[DONE]"
+                        return
+                    yield json.loads(chunk)
+
+    def propose(
+        self,
+        question: str,
+        *,
+        context: str | None = None,
+        context_json: KosistenzContext | dict | None = None,
+    ) -> list[dict[str, Any]]:
+        payload: dict[str, Any] = {"question": question}
+        if context:
+            payload["context"] = context
+        if context_json is not None:
+            if isinstance(context_json, KosistenzContext):
+                payload["context_json"] = context_json.model_dump(exclude_none=True)
+            else:
+                payload["context_json"] = context_json
+        with httpx.Client(timeout=120.0) as client:
+            r = client.post(
+                f"{self.base_url}/propose",
+                json=payload,
+                headers=self._headers(),
+            )
+            r.raise_for_status()
+            return list(r.json().get("proposals") or [])
 
     def ingest_text(
         self,
@@ -82,15 +188,44 @@ def chat_brain(
     *,
     settings: Settings | None = None,
     context: str | None = None,
+    context_json: KosistenzContext | dict | None = None,
+    session_id: str | None = None,
 ) -> SupervisorResult:
     """Route chat through HTTP when CLUNY_BRAIN_URL is set, else in-process."""
     settings = settings or Settings.load()
     client = BrainClient.from_settings(settings)
     if client is not None:
-        return client.chat(question, context=context)
-    from cluny.supervisor import run_chat
+        result, _sid = client.chat(
+            question,
+            context=context,
+            context_json=context_json,
+            session_id=session_id,
+        )
+        return result
+    from cluny.chat_service import api_chat
 
-    return run_chat(question, settings=settings, context=context)
+    data = api_chat(
+        question,
+        settings=settings,
+        context=context,
+        context_json=context_json,
+        session_id=session_id,
+    )
+    sources = tuple(
+        SourceCitation(
+            label=str(s["label"]),
+            snippet=str(s["snippet"]),
+            doc_path=s.get("doc_path"),
+            chunk_index=s.get("chunk_index"),
+        )
+        for s in data.get("sources") or []
+    )
+    return SupervisorResult(
+        route=data["route"],  # type: ignore[arg-type]
+        answer=data["answer"],
+        tool_calls=list(data.get("tool_calls") or []),
+        sources=sources,
+    )
 
 
 def ingest_text_brain(

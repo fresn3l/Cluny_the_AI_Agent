@@ -9,6 +9,7 @@ from typing import Any
 
 from cluny.config import Settings
 from cluny.ollama_client import OllamaClient, OllamaError
+from cluny.kosistenz_context import KosistenzContext
 from cluny.supervisor import format_chat_question
 
 PROPOSE_SYSTEM = (
@@ -79,11 +80,12 @@ def run_proposals(
     question: str,
     *,
     context: str | None = None,
+    context_json: KosistenzContext | dict | None = None,
     settings: Settings | None = None,
 ) -> list[WorkProposal]:
     """Return structured work proposals for Kosistenz to accept/schedule."""
     settings = settings or Settings.load()
-    user = format_chat_question(question, context)
+    user = format_chat_question(question, context, context_json=context_json)
     ollama = OllamaClient(settings)
     raw = ollama.chat(system=PROPOSE_SYSTEM, user=user)
     try:
