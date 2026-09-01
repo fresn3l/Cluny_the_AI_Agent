@@ -343,8 +343,33 @@ let proposals = try await client.propose(
 | `context` | string | Freeform Kosistenz snapshot |
 | `context_json` | object | Structured: `date`, `deadline_todos`, `events_today`, `weekly_goals`, `notes` |
 | `session_id` | string? | Omit on first message; pass back for multi-turn |
+| `collection` | string? | Limit RAG to a named library collection (e.g. `research`) |
 
 Cluny merges `context` + `context_json` into the prompt. Prefer `context_json` for the widget — cleaner than string concatenation in Swift.
+
+### Task mirror (optional)
+
+Kosistenz owns authoritative todos and scheduling. Cluny can **mirror** todos by `external_id` so the tasks agent and local tools see the same open work — without Cluny picking days or clock slots.
+
+```http
+POST /tasks/sync
+{
+  "external_id": "kosistenz-todo-uuid",
+  "title": "Send agenda",
+  "status": "open",
+  "due_at": "2026-09-04",
+  "notes": "optional"
+}
+```
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/tasks/sync` | Upsert mirror by `external_id` |
+| `GET` | `/tasks/sync` | List all mirrored tasks |
+| `GET` | `/tasks/sync/{external_id}` | Get one mirror |
+| `DELETE` | `/tasks/sync/{external_id}` | Remove mirror when Kosistenz deletes the todo |
+
+Push updates when Kosistenz todos change; delete the mirror when the real todo is removed. Cluny never schedules — it only reflects state for Ask/agent context.
 
 ### Errors
 

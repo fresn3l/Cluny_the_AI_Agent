@@ -16,6 +16,7 @@ class UserConfig:
     retrieval_k: int = 5
     hybrid_vector_weight: float = 0.5
     agent_mode: str = "ask"
+    ask_collection: str = ""
 
     @classmethod
     def from_dict(cls, data: dict) -> UserConfig:
@@ -25,6 +26,7 @@ class UserConfig:
             retrieval_k=int(data.get("retrieval_k", 5)),
             hybrid_vector_weight=float(data.get("hybrid_vector_weight", 0.5)),
             agent_mode=str(data.get("agent_mode", "ask")),
+            ask_collection=str(data.get("ask_collection", "")),
         )
 
 

@@ -52,6 +52,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     _ensure_column(conn, "tasks", "recurrence", "TEXT")
     _ensure_column(conn, "tasks", "external_id", "TEXT")
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_external_id
+        ON tasks(external_id) WHERE external_id IS NOT NULL
+        """
+    )
     conn.commit()
 
 
@@ -142,6 +148,75 @@ def list_tasks(
     q += " ORDER BY COALESCE(due_at, created_at) ASC"
     cur = conn.execute(q, params)
     return [_row_to_task(r) for r in cur.fetchall()]
+
+
+def find_task_by_external_id(conn: sqlite3.Connection, external_id: str) -> TaskRow | None:
+    cur = conn.execute(
+        "SELECT * FROM tasks WHERE external_id = ? COLLATE NOCASE",
+        (external_id.strip(),),
+    )
+    row = cur.fetchone()
+    return _row_to_task(row) if row else None
+
+
+def list_synced_tasks(conn: sqlite3.Connection) -> list[TaskRow]:
+    cur = conn.execute(
+        "SELECT * FROM tasks WHERE external_id IS NOT NULL ORDER BY COALESCE(due_at, created_at) ASC"
+    )
+    return [_row_to_task(r) for r in cur.fetchall()]
+
+
+def sync_task_by_external_id(
+    conn: sqlite3.Connection,
+    external_id: str,
+    title: str,
+    *,
+    status: str | None = None,
+    due_at: str | None = None,
+    notes: str | None = None,
+    project_id: str | None = None,
+    recurrence: str | None = None,
+) -> TaskRow:
+    """Upsert a Kosistenz-linked mirror task (Cluny does not own scheduling)."""
+    ext = external_id.strip()
+    if not ext:
+        raise ValueError("external_id is required")
+    existing = find_task_by_external_id(conn, ext)
+    parsed_due = parse_due(due_at) if due_at else None
+    if existing:
+        return update_task(
+            conn,
+            existing.id,
+            title=title,
+            status=status,
+            due_at=parsed_due if due_at is not None else None,
+            notes=notes,
+            project_id=project_id,
+            recurrence=recurrence,
+            external_id=ext,
+        ) or existing
+    task = create_task(
+        conn,
+        title,
+        due_at=parsed_due,
+        notes=notes,
+        project_id=project_id,
+        recurrence=recurrence,
+        external_id=ext,
+    )
+    if status and status != task.status:
+        updated = update_task(conn, task.id, status=status)
+        return updated or task
+    return task
+
+
+def delete_task_by_external_id(conn: sqlite3.Connection, external_id: str) -> bool:
+    cur = conn.execute(
+        "DELETE FROM tasks WHERE external_id = ? COLLATE NOCASE",
+        (external_id.strip(),),
+    )
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def get_task(conn: sqlite3.Connection, task_id: str) -> TaskRow | None:
