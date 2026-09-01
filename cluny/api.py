@@ -32,10 +32,23 @@ try:
     from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
     from fastapi.responses import StreamingResponse
     from pydantic import BaseModel, Field
+    from starlette.middleware.base import BaseHTTPMiddleware
 except ImportError as e:  # pragma: no cover
     raise ImportError(
         "FastAPI is required for the API. Install with: pip install -e '.[api]'"
     ) from e
+
+_LEGACY_PATH_PREFIXES = ("/tasks", "/calendar", "/context")
+
+class _LegacyDeprecationMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        path = request.url.path
+        if any(path == prefix or path.startswith(prefix + "/") for prefix in _LEGACY_PATH_PREFIXES):
+            response.headers["Deprecation"] = "true"
+            response.headers["X-Cluny-Legacy"] = "cli-only"
+            response.headers["Link"] = '</INTEGRATION.md>; rel="deprecation"'
+        return response
 
 
 class SearchRequest(BaseModel):
@@ -151,9 +164,14 @@ def _ollama_ok(settings: Settings) -> bool:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Cluny API",
-        version="0.2.0",
-        description="Brain service for Kosistenz — journal, calendar, todos, RAG.",
+        version="0.2.1",
+        description=(
+            "Brain service for Kosistenz — RAG, Ask/chat/agent, journal index copy. "
+            "Kosistenz owns week clock, todos, calendar, and journal files. "
+            "See INTEGRATION.md (authoritative: Kosistenz docs/cluny-integration.md)."
+        ),
     )
+    app.add_middleware(_LegacyDeprecationMiddleware)
 
     @app.get("/health")
     def health(settings: Settings = Depends(_settings)) -> dict[str, Any]:
@@ -178,10 +196,12 @@ def create_app() -> FastAPI:
             pass
         return {
             "status": "ok",
+            "integration": "brain-only",
             "ollama_ok": _ollama_ok(settings),
             "doc_count": doc_count,
             "task_count": task_count,
             "chunk_count": chunk_count,
+            "task_count_note": "local CLI/widget tasks.sqlite — not Kosistenz todos",
         }
 
     @app.post("/search", dependencies=[Depends(_check_auth)], tags=["Brain"])
@@ -274,7 +294,7 @@ def create_app() -> FastAPI:
             ]
         }
 
-    @app.get("/tasks", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    @app.get("/tasks", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def get_tasks(
         settings: Settings = Depends(_settings),
         status: str | None = Query(default=None),
@@ -295,7 +315,7 @@ def create_app() -> FastAPI:
         conn.close()
         return {"tasks": [_task_dict(t) for t in rows]}
 
-    @app.post("/tasks", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    @app.post("/tasks", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def create_task(body: TaskCreateRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         conn = tasks_connect(settings)
         task = db_create_task(
@@ -310,7 +330,7 @@ def create_app() -> FastAPI:
         conn.close()
         return _task_dict(task)
 
-    @app.get("/tasks/{task_id}", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    @app.get("/tasks/{task_id}", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def get_task(task_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         conn = tasks_connect(settings)
         task = resolve_task(conn, task_id)
@@ -319,7 +339,7 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Task not found")
         return _task_dict(task)
 
-    @app.patch("/tasks/{task_id}", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    @app.patch("/tasks/{task_id}", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def patch_task(
         task_id: str,
         body: TaskUpdateRequest,
@@ -345,7 +365,7 @@ def create_app() -> FastAPI:
         assert updated is not None
         return _task_dict(updated)
 
-    @app.post("/tasks/{task_id}/complete", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    @app.post("/tasks/{task_id}/complete", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def complete_task_route(task_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         conn = tasks_connect(settings)
         task = resolve_task(conn, task_id)
@@ -357,7 +377,7 @@ def create_app() -> FastAPI:
         assert done is not None
         return _task_dict(done)
 
-    @app.delete("/tasks/{task_id}", dependencies=[Depends(_check_auth)], tags=["Tasks"])
+    @app.delete("/tasks/{task_id}", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def delete_task_route(task_id: str, settings: Settings = Depends(_settings)) -> dict[str, str]:
         conn = tasks_connect(settings)
         task = resolve_task(conn, task_id)
@@ -368,7 +388,7 @@ def create_app() -> FastAPI:
         conn.close()
         return {"deleted": task.id}
 
-    @app.get("/calendar/events", dependencies=[Depends(_check_auth)], tags=["Calendar"])
+    @app.get("/calendar/events", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def calendar_events(
         settings: Settings = Depends(_settings),
         limit: int = Query(default=20, ge=1, le=100),
@@ -395,7 +415,7 @@ def create_app() -> FastAPI:
             ]
         }
 
-    @app.post("/calendar/import", dependencies=[Depends(_check_auth)], tags=["Calendar"])
+    @app.post("/calendar/import", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def calendar_import(body: CalendarImportRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         from cluny.calendar_db import import_ics
 
@@ -405,11 +425,11 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=str(e)) from e
         return {"imported": n}
 
-    @app.post("/context/day", dependencies=[Depends(_check_auth)], tags=["Context"])
+    @app.post("/context/day", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def context_day(body: ContextDayRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         return build_day_context(settings, body.date)
 
-    @app.post("/context/meeting", dependencies=[Depends(_check_auth)], tags=["Context"])
+    @app.post("/context/meeting", dependencies=[Depends(_check_auth)], tags=["Legacy (CLI only)"], deprecated=True)
     def context_meeting(
         body: ContextMeetingRequest,
         settings: Settings = Depends(_settings),

@@ -222,7 +222,7 @@ cluny calendar import calendar.ics
 
 ## HTTP API (Kosistenz integration)
 
-Cluny is the **brain service** behind **[Kosistenz](https://github.com/fresn3l/Kosistenz)** (journal, calendar, todos). Start the API for Kosistenz or other local clients:
+**Kosistenz is the life you live in. Cluny is the brain you ask.** Kosistenz owns the week clock, todos, calendar, journal files, and pack; Cluny provides RAG, Ask/chat/agent, and indexes a copy of journal text.
 
 ```bash
 pip install -e ".[api]"
@@ -230,7 +230,7 @@ cluny serve
 # http://127.0.0.1:8787/health  ·  /docs for OpenAPI
 ```
 
-See **`INTEGRATION.md`** for endpoints, auth, `external_id: kosistenz:{uuid}`, context bundles, and a Swift client sketch. Optional login service: `macos/com.cluny.serve.plist`.
+See **`INTEGRATION.md`** for the Kosistenz contract (aligned with Kosistenz `docs/cluny-integration.md`). Optional login service: `macos/com.cluny.serve.plist`.
 
 ## Docs
 

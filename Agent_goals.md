@@ -28,14 +28,18 @@ Self-hosted, customizable, aligned with “coded and customizable.”
 
 ## Platform — Kosistenz + Cluny
 
-**[Kosistenz](https://github.com/fresn3l/Kosistenz)** is the **home-base Mac app** (journal, calendar, to-dos, day planning). **Cluny** (this repo) is the **brain service** behind it: RAG, agents, task/calendar stores, and `cluny serve` HTTP API.
+**Kosistenz is the life you live in. Cluny is the brain you ask.**
+
+**[Kosistenz](https://github.com/fresn3l/Kosistenz)** owns the week clock, hard events, deadline to-dos, packing, goals, workouts, journal **files**, and iPhone pack — usable even when Cluny is quit.
+
+**Cluny** (this repo) owns PDFs/notes, hybrid RAG, Ask/chat/agent, and indexing a **copy** of journal text. It may **propose** work (title, estimate, due, keyword); it never picks clock slots, never Fill week, and never maintains a second authoritative todo/calendar list for Kosistenz.
 
 | Repo | Role |
 |------|------|
-| **Kosistenz** | Primary UI — what you open daily |
-| **Cluny_the_AI_Agent** | Intelligence + durable stores — what Kosistenz calls over localhost |
+| **Kosistenz** | Daily Mac home base — scheduling, todos, journal, pack |
+| **Cluny_the_AI_Agent** | Optional local brain — `cluny serve` on localhost |
 
-Cluny widget and full GUI remain useful alongside Kosistenz (quick capture and deep library browse). Sprint 11 delivers the API contract Kosistenz consumes — see [Sprints_11.md](Sprints_11.md).
+Integration contract: [INTEGRATION.md](INTEGRATION.md) (aligned with Kosistenz `docs/cluny-integration.md`). Cluny widget and full GUI remain for quick capture and deep library browse alongside Kosistenz.
 
 ---
 

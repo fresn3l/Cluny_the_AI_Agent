@@ -1,8 +1,8 @@
-"""Integration API tests for Kosistenz consumers."""
+"""Kosistenz brain API tests (not legacy task/calendar routes)."""
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -10,7 +10,8 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from cluny.api import create_app
-from cluny.config import Settings
+from cluny.query import RetrievedChunk
+from cluny.supervisor import SupervisorResult
 
 
 @pytest.fixture
@@ -20,94 +21,61 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path):
     return TestClient(create_app())
 
 
-@pytest.fixture
-def settings(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Settings:
-    monkeypatch.setenv("CLUNY_DATA_DIR", str(tmp_path / ".cluny"))
-    return Settings.load()
-
-
-def test_health_extended(client: TestClient):
+def test_health_brain_contract(client: TestClient):
     r = client.get("/health")
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ok"
+    assert data["integration"] == "brain-only"
     assert "ollama_ok" in data
-    assert "doc_count" in data
-    assert "task_count" in data
+    assert "task_count_note" in data
 
 
-def test_task_crud(client: TestClient):
-    r = client.post(
-        "/tasks",
-        json={
-            "title": "Kosistenz task",
-            "due_at": "tomorrow",
-            "external_id": "kosistenz:test-001",
-        },
+def test_search_mocked(client: TestClient):
+    chunk = RetrievedChunk(
+        text="week clock packing",
+        label="note.md",
+        doc_path="/tmp/note.md",
+        chunk_index=0,
+        score=0.9,
+        doc_id="abc",
     )
+    with patch("cluny.api.retrieve", return_value=[chunk]):
+        r = client.post("/search", json={"query": "packing", "k": 3})
     assert r.status_code == 200
-    task = r.json()
-    assert task["title"] == "Kosistenz task"
-    assert task["external_id"] == "kosistenz:test-001"
-    tid = task["id"]
-
-    r2 = client.get("/tasks", params={"external_id": "kosistenz:test-001"})
-    assert r2.status_code == 200
-    assert len(r2.json()["tasks"]) == 1
-
-    r3 = client.patch(f"/tasks/{tid}", json={"notes": "updated"})
-    assert r3.status_code == 200
-    assert r3.json()["notes"] == "updated"
-
-    r4 = client.post(f"/tasks/{tid}/complete")
-    assert r4.status_code == 200
-    assert r4.json()["status"] == "done"
-
-    r5 = client.delete(f"/tasks/{tid}")
-    assert r5.status_code == 200
+    assert "week clock" in r.json()["chunks"][0]["text"]
 
 
-def test_context_day(client: TestClient):
-    client.post("/tasks", json={"title": "Day task", "due_at": "today"})
-    r = client.post("/context/day", json={"date": "today"})
+def test_chat_mocked(client: TestClient):
+    result = SupervisorResult(route="ask", answer="Focus on Thursday deadline.", tool_calls=[])
+    with patch("cluny.api.run_chat", return_value=result):
+        r = client.post(
+            "/chat",
+            json={"question": "What should I prioritize? Open: send agenda (Thu)."},
+        )
     assert r.status_code == 200
     body = r.json()
-    assert "date" in body
-    assert "tasks" in body
-    assert "events" in body
+    assert body["answer"] == "Focus on Thursday deadline."
+    assert body["route"] == "ask"
 
 
-def test_context_meeting(client: TestClient):
-    with patch("cluny.context.retrieve", return_value=[]):
-        r = client.post("/context/meeting", json={"title": "Standup"})
+def test_ingest_journal_copy_mocked(client: TestClient):
+    mock_result = MagicMock(doc_id="doc-1", chunk_count=2)
+    with (
+        patch("cluny.api.get_collection"),
+        patch("cluny.api.OllamaClient"),
+        patch("cluny.api.add_inline_text", return_value=mock_result),
+    ):
+        r = client.post(
+            "/ingest/text",
+            json={
+                "text": "Journal entry body",
+                "catalog": True,
+                "source": "kosistenz-journal",
+                "title": "2026-09-01 journal",
+            },
+        )
     assert r.status_code == 200
     data = r.json()
-    assert data["title"] == "Standup"
-    assert "snippets" in data
-
-
-def test_calendar_events(client: TestClient, tmp_path):
-    ics = tmp_path / "cal.ics"
-    ics.write_text(
-        "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Team sync\n"
-        "DTSTART:20260901T100000Z\nEND:VEVENT\nEND:VCALENDAR\n",
-        encoding="utf-8",
-    )
-    r = client.post("/calendar/import", json={"path": str(ics)})
-    assert r.status_code == 200
-    r2 = client.get("/calendar/events", params={"date": "2026-09-01"})
-    assert r2.status_code == 200
-    events = r2.json()["events"]
-    assert any("Team sync" in e["summary"] for e in events)
-
-
-def test_calendar_import_endpoint(client: TestClient, tmp_path):
-    ics = tmp_path / "import.ics"
-    ics.write_text(
-        "BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Import test\n"
-        "DTSTART:20260902T100000Z\nEND:VEVENT\nEND:VCALENDAR\n",
-        encoding="utf-8",
-    )
-    r = client.post("/calendar/import", json={"path": str(ics)})
-    assert r.status_code == 200
-    assert r.json()["imported"] == 1
+    assert data["catalog"] is True
+    assert data["doc_id"] == "doc-1"

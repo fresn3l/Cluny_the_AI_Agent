@@ -25,6 +25,7 @@ def test_health(client: TestClient):
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ok"
+    assert data["integration"] == "brain-only"
     assert "ollama_ok" in data
     assert "doc_count" in data
     assert "task_count" in data
