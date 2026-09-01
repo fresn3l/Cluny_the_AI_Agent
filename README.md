@@ -154,6 +154,16 @@ cluny gui
 
 That builds **Cluny.app** and installs it to `~/Applications/`. Launch from Spotlight or add to **Login Items**. Click the menu bar icon for the widget; tray menu → **Open full window** for the full UI. Re-run `install_app.sh` if you move the repo folder.
 
+**Standalone build (py2app, Sprint 12):** packages a repo-independent app with data in `~/Library/Application Support/Cluny` and HTTP brain on `127.0.0.1:8787`:
+
+```bash
+pip install -e ".[api,packaging]"
+./macos/build_py2app.sh
+open dist/Cluny.app
+```
+
+For dev, match packaged HTTP mode without py2app: `CLUNY_USE_HTTP_BRAIN=1 cluny widget`.
+
 | Surface | Best for |
 |---------|----------|
 | **Widget** | Quick ask, paste capture, add task, glance at stats |

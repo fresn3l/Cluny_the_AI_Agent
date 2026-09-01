@@ -57,7 +57,7 @@ class ClunyTray:
         if sys.platform == "darwin":
             self._tray.showMessage(
                 "Cluny",
-                "Menu bar widget is running. Click the icon for Ask / Capture / Task.",
+                "Menu bar widget is running. Click the icon for Ask / Capture / Propose.",
                 QSystemTrayIcon.MessageIcon.Information,
                 4000,
             )
