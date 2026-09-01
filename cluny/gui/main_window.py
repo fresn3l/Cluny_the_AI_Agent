@@ -40,12 +40,12 @@ from cluny.library_db import (
     document_count,
     get_collections_for_doc,
     get_tags_for_doc,
+    list_collections,
     list_documents,
 )
 from cluny.ollama_client import OllamaError
 from cluny.query import RagAnswer, RagSource, rag_answer_stream
 from cluny.sessions import add_message, connect as sessions_connect, get_or_create_last_session, list_messages
-from cluny.store import get_collection
 from cluny.store import get_collection
 from cluny.user_config import UserConfig, load_user_config, save_user_config
 
@@ -60,18 +60,30 @@ class WorkerSignals(QObject):
 class RagRunnable(QRunnable):
     """Runs RAG off the UI thread; streams tokens when not in agent mode."""
 
-    def __init__(self, question: str, k: int, *, agent_mode: str) -> None:
+    def __init__(
+        self,
+        question: str,
+        k: int,
+        *,
+        agent_mode: str,
+        collection_name: str | None = None,
+    ) -> None:
         super().__init__()
         self._question = question
         self._k = k
         self._agent_mode = agent_mode
+        self._collection_name = collection_name
         self.signals = WorkerSignals()
 
     def run(self) -> None:
         try:
             settings = Settings.load()
             if self._agent_mode == "chat":
-                result = chat_brain(self._question, settings=settings)
+                result = chat_brain(
+                    self._question,
+                    settings=settings,
+                    collection=self._collection_name,
+                )
                 body = result.answer
                 if result.tool_calls:
                     body = "Tools: " + "; ".join(result.tool_calls) + "\n\n" + body
@@ -95,7 +107,12 @@ class RagRunnable(QRunnable):
                 )
                 return
 
-            stream, sources, empty = rag_answer_stream(self._question, k=self._k, settings=settings)
+            stream, sources, empty = rag_answer_stream(
+                self._question,
+                k=self._k,
+                settings=settings,
+                collection_name=self._collection_name,
+            )
             if empty:
                 self.signals.finished.emit(
                     RagAnswer(
@@ -497,6 +514,11 @@ class MainWindow(QMainWindow):
         self._k_spin.setValue(self._user_config.retrieval_k)
         v.addWidget(self._k_spin)
 
+        v.addWidget(QLabel("Collection (Ask / Chat RAG)"))
+        self._collection_combo = QComboBox()
+        self._collection_combo.addItem("(all collections)", "")
+        v.addWidget(self._collection_combo)
+
         self._agent_combo = QComboBox()
         self._agent_combo.addItems(
             [
@@ -687,7 +709,18 @@ class MainWindow(QMainWindow):
             5: "planner",
         }
         agent_mode = mode_map.get(mode_idx, "ask")
-        runnable = RagRunnable(text, k, agent_mode=agent_mode)
+        collection = self._collection_combo.currentData()
+        collection_name = str(collection) if collection else None
+        if collection_name == "":
+            collection_name = None
+        self._user_config.ask_collection = collection_name or ""
+        save_user_config(self._settings, self._user_config)
+        runnable = RagRunnable(
+            text,
+            k,
+            agent_mode=agent_mode,
+            collection_name=collection_name,
+        )
         runnable.signals.finished.connect(self._on_rag_finished)
         runnable.signals.error.connect(self._on_rag_error)
         runnable.signals.token.connect(self._on_rag_token)
@@ -751,6 +784,25 @@ class MainWindow(QMainWindow):
     def _refresh_all(self) -> None:
         self._refresh_stats()
         self._refresh_library()
+        self._refresh_collections()
+
+    def _refresh_collections(self) -> None:
+        try:
+            settings = Settings.load()
+            conn = connect(settings)
+            names = list_collections(conn)
+            conn.close()
+            current = self._user_config.ask_collection or ""
+            self._collection_combo.blockSignals(True)
+            self._collection_combo.clear()
+            self._collection_combo.addItem("(all collections)", "")
+            for name in names:
+                self._collection_combo.addItem(name, name)
+            idx = self._collection_combo.findData(current)
+            self._collection_combo.setCurrentIndex(idx if idx >= 0 else 0)
+            self._collection_combo.blockSignals(False)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _refresh_library(self) -> None:
         try:

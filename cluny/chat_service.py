@@ -71,6 +71,7 @@ def api_chat(
     context: str | None = None,
     context_json: KosistenzContext | dict | None = None,
     session_id: str | None = None,
+    collection: str | None = None,
 ) -> dict[str, Any]:
     sid = resolve_session_id(settings, session_id, title_hint=question)
     prefix = history_prefix_for_session(settings, sid)
@@ -80,6 +81,7 @@ def api_chat(
         context=context,
         context_json=context_json,
         history_prefix=prefix or None,
+        collection_name=collection,
     )
     persist_turn(settings, sid, question, result.answer)
     return chat_result_to_dict(result, session_id=sid)
@@ -93,6 +95,7 @@ def api_chat_stream_events(
     context_json: KosistenzContext | dict | None = None,
     session_id: str | None = None,
     k: int = 5,
+    collection: str | None = None,
 ) -> Iterator[str]:
     """Yield JSON payload strings for SSE (caller adds data: prefix)."""
     sid = resolve_session_id(settings, session_id, title_hint=question)
@@ -104,6 +107,7 @@ def api_chat_stream_events(
         context_json=context_json,
         history_prefix=prefix or None,
         k=k,
+        collection_name=collection,
     )
 
     collected: list[str] = []

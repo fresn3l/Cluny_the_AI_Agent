@@ -17,6 +17,12 @@ from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.proposals import run_proposals
 from cluny.query import retrieve
 from cluny.store import get_collection
+from cluny.task_sync import (
+    api_delete_synced_task,
+    api_get_synced_task,
+    api_list_synced_tasks,
+    api_sync_task,
+)
 from cluny.tasks_db import connect as tasks_connect, list_tasks
 
 try:
@@ -32,6 +38,7 @@ except ImportError as e:  # pragma: no cover
 class SearchRequest(BaseModel):
     query: str
     k: int = Field(default=5, ge=1, le=50)
+    collection: str | None = None
 
 
 class IngestTextRequest(BaseModel):
@@ -51,6 +58,7 @@ class ChatRequest(BaseModel):
     context: str | None = None
     context_json: KosistenzContext | None = None
     session_id: str | None = None
+    collection: str | None = None
     k: int = Field(default=5, ge=1, le=50)
 
 
@@ -58,6 +66,16 @@ class ProposeRequest(BaseModel):
     question: str
     context: str | None = None
     context_json: KosistenzContext | None = None
+
+
+class TaskSyncRequest(BaseModel):
+    external_id: str
+    title: str
+    status: str = "open"
+    due_at: str | None = None
+    notes: str | None = None
+    project_id: str | None = None
+    recurrence: str | None = None
 
 
 def _settings() -> Settings:
@@ -164,10 +182,16 @@ def create_app() -> FastAPI:
     @app.post("/search", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def search(body: SearchRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         try:
-            chunks = retrieve(body.query, k=body.k, settings=settings)
+            chunks = retrieve(
+                body.query,
+                k=body.k,
+                settings=settings,
+                collection_name=body.collection,
+            )
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
         return {
+            "collection": body.collection,
             "chunks": [
                 {
                     "text": ch.text,
@@ -190,6 +214,7 @@ def create_app() -> FastAPI:
                 context_json=body.context_json,
                 session_id=body.session_id,
                 k=body.k,
+                collection=body.collection,
             )
         except SessionNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
@@ -268,6 +293,7 @@ def create_app() -> FastAPI:
                 context=body.context,
                 context_json=body.context_json,
                 session_id=body.session_id,
+                collection=body.collection,
             )
         except SessionNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
@@ -284,12 +310,51 @@ def create_app() -> FastAPI:
                 context_json=body.context_json,
                 session_id=body.session_id,
                 k=body.k,
+                collection=body.collection,
             )
         except SessionNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
         return _sse_from_payloads(payloads)
+
+    @app.post("/tasks/sync", dependencies=[Depends(_check_auth)], tags=["Kosistenz mirror"])
+    def tasks_sync_upsert(
+        body: TaskSyncRequest, settings: Settings = Depends(_settings)
+    ) -> dict[str, Any]:
+        """Mirror a Kosistenz todo by external_id (not authoritative for scheduling)."""
+        if body.status not in ("open", "done"):
+            raise HTTPException(status_code=400, detail="status must be open or done")
+        try:
+            return api_sync_task(
+                settings=settings,
+                external_id=body.external_id,
+                title=body.title,
+                status=body.status,
+                due_at=body.due_at,
+                notes=body.notes,
+                project_id=body.project_id,
+                recurrence=body.recurrence,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.get("/tasks/sync", dependencies=[Depends(_check_auth)], tags=["Kosistenz mirror"])
+    def tasks_sync_list(settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        return {"tasks": api_list_synced_tasks(settings)}
+
+    @app.get("/tasks/sync/{external_id}", dependencies=[Depends(_check_auth)], tags=["Kosistenz mirror"])
+    def tasks_sync_get(external_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        task = api_get_synced_task(settings, external_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Synced task not found")
+        return task
+
+    @app.delete("/tasks/sync/{external_id}", dependencies=[Depends(_check_auth)], tags=["Kosistenz mirror"])
+    def tasks_sync_delete(external_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        if not api_delete_synced_task(settings, external_id):
+            raise HTTPException(status_code=404, detail="Synced task not found")
+        return {"deleted": True, "external_id": external_id}
 
     @app.post("/propose", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def propose(body: ProposeRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:

@@ -437,12 +437,26 @@ def search(
     settings = Settings.from_env()
     doc_ids = None
     if collection:
-        conn = connect(settings)
-        doc_ids = doc_ids_in_collection(conn, collection)
-        conn.close()
-        if not doc_ids:
-            typer.echo(f"No documents in collection {collection!r}.", err=True)
+        try:
+            chunks = retrieve(
+                query, k=k, settings=settings, collection_name=collection
+            )
+        except OllamaError as e:
+            typer.echo(str(e), err=True)
+            raise typer.Exit(code=1) from e
+        if not chunks:
+            typer.echo(f"No results in collection {collection!r}.", err=True)
             raise typer.Exit(code=1)
+        for i, ch in enumerate(chunks, 1):
+            typer.echo(f"\n--- [{i}] score={ch.score:.4f}  {ch.label} ---")
+            if ch.doc_path:
+                typer.echo(f"path: {ch.doc_path}")
+            preview = ch.text.strip().replace("\n", " ")
+            if len(preview) > 500:
+                preview = preview[:499] + "…"
+            typer.echo(preview)
+        return
+
     try:
         chunks = retrieve(query, k=k, settings=settings, doc_ids=doc_ids)
     except OllamaError as e:
@@ -467,6 +481,9 @@ def search(
 def ask(
     question: str = typer.Argument(...),
     k: int = typer.Option(5, help="Number of chunks to retrieve."),
+    collection: str | None = typer.Option(
+        None, "--collection", "-c", help="Limit RAG to a named collection."
+    ),
     no_stream: bool = typer.Option(
         False,
         "--no-stream",
@@ -488,7 +505,9 @@ def ask(
         add_message(sess_conn, session_id, "user", question)
     try:
         if no_stream:
-            result = rag_answer(question, k=k, settings=settings)
+            result = rag_answer(
+                question, k=k, settings=settings, collection_name=collection
+            )
             if result.empty_index:
                 typer.echo(result.answer, err=True)
                 raise typer.Exit(code=1)
@@ -497,7 +516,9 @@ def ask(
                 add_message(sess_conn, session_id, "assistant", result.answer)
             return
 
-        stream, sources, empty = rag_answer_stream(question, k=k, settings=settings)
+        stream, sources, empty = rag_answer_stream(
+            question, k=k, settings=settings, collection_name=collection
+        )
         if empty:
             msg = "".join(stream)
             typer.echo(msg, err=True)
@@ -525,10 +546,15 @@ def ask(
 @app.command()
 def chat(
     question: str = typer.Argument(..., help="Question routed by intent classifier."),
+    collection: str | None = typer.Option(
+        None, "--collection", "-c", help="Limit RAG ask route to a named collection."
+    ),
 ) -> None:
     """Supervisor entrypoint — routes to ask, knowledge agent, tasks, or calendar."""
     try:
-        result = run_chat(question, settings=Settings.load())
+        result = run_chat(
+            question, settings=Settings.load(), collection_name=collection
+        )
     except OllamaError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(code=1) from e

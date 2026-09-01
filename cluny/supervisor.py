@@ -131,9 +131,14 @@ def _result_from_rag(route: Route, rag) -> SupervisorResult:
     )
 
 
-def _calendar_answer(settings: Settings, question: str) -> SupervisorResult:
+def _calendar_answer(
+    settings: Settings,
+    question: str,
+    *,
+    collection_name: str | None = None,
+) -> SupervisorResult:
     if settings.kosistenz_journal_dir:
-        rag = rag_answer(question, settings=settings)
+        rag = rag_answer(question, settings=settings, collection_name=collection_name)
         prefix = (
             "Calendar and scheduling live in Kosistenz. Include events and deadlines "
             "in your message — answering from that context and indexed notes.\n\n"
@@ -181,6 +186,7 @@ def run_chat(
     context: str | None = None,
     context_json: KosistenzContext | dict | None = None,
     history_prefix: str | None = None,
+    collection_name: str | None = None,
 ) -> SupervisorResult:
     settings = settings or Settings.load()
     merged = format_chat_question(
@@ -192,7 +198,7 @@ def run_chat(
     route = classify_intent(merged, settings)
 
     if route == "calendar":
-        return _calendar_answer(settings, merged)
+        return _calendar_answer(settings, merged, collection_name=collection_name)
 
     if route == "planner":
         result = run_agent(merged, settings=settings, mode="planner")
@@ -206,7 +212,10 @@ def run_chat(
         result = run_agent(merged, settings=settings, mode="knowledge")
         return SupervisorResult(route=route, answer=result.answer, tool_calls=result.tool_calls)
 
-    return _result_from_rag("ask", rag_answer(merged, settings=settings))
+    return _result_from_rag(
+        "ask",
+        rag_answer(merged, settings=settings, collection_name=collection_name),
+    )
 
 
 def run_chat_stream(
@@ -217,6 +226,7 @@ def run_chat_stream(
     context_json: KosistenzContext | dict | None = None,
     history_prefix: str | None = None,
     k: int = 5,
+    collection_name: str | None = None,
 ) -> tuple[Route, Iterator[str], tuple[SourceCitation, ...], bool]:
     """
     Stream tokens for ask/calendar RAG routes; non-stream routes yield one chunk.
@@ -232,7 +242,12 @@ def run_chat_stream(
     route = classify_intent(merged, settings)
 
     if route in ("ask", "calendar") and (route == "ask" or settings.kosistenz_journal_dir):
-        stream, sources, empty = rag_answer_stream(merged, k=k, settings=settings)
+        stream, sources, empty = rag_answer_stream(
+            merged,
+            k=k,
+            settings=settings,
+            collection_name=collection_name,
+        )
         cites = tuple(SourceCitation.from_rag(s) for s in sources)
         return route, stream, cites, empty
 
@@ -242,6 +257,7 @@ def run_chat_stream(
         context=context,
         context_json=context_json,
         history_prefix=history_prefix,
+        collection_name=collection_name,
     )
 
     def _once() -> Iterator[str]:

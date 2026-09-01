@@ -128,21 +128,29 @@ public struct ClunyBrainClient: Sendable {
         question: String,
         context: String? = nil,
         contextJSON: KosistenzContextPayload? = nil,
-        sessionId: String? = nil
+        sessionId: String? = nil,
+        collection: String? = nil
     ) async throws -> ClunyChatResponse {
         struct Body: Encodable {
             let question: String
             let context: String?
             let contextJson: KosistenzContextPayload?
             let sessionId: String?
+            let collection: String?
 
             enum CodingKeys: String, CodingKey {
-                case question, context
+                case question, context, collection
                 case contextJson = "context_json"
                 case sessionId = "session_id"
             }
         }
-        let payload = Body(question: question, context: context, contextJson: contextJSON, sessionId: sessionId)
+        let payload = Body(
+            question: question,
+            context: context,
+            contextJson: contextJSON,
+            sessionId: sessionId,
+            collection: collection
+        )
         let body = try JSONEncoder().encode(payload)
         let (data, resp) = try await URLSession.shared.data(for: request(path: "chat", method: "POST", body: body))
         try validate(resp)

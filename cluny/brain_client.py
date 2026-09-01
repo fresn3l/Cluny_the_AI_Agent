@@ -47,6 +47,7 @@ class BrainClient:
         context: str | None = None,
         context_json: KosistenzContext | dict | None = None,
         session_id: str | None = None,
+        collection: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"question": question}
         if context:
@@ -58,6 +59,8 @@ class BrainClient:
                 payload["context_json"] = context_json
         if session_id:
             payload["session_id"] = session_id
+        if collection:
+            payload["collection"] = collection
         return payload
 
     def _parse_chat_response(self, data: dict[str, Any]) -> SupervisorResult:
@@ -84,6 +87,7 @@ class BrainClient:
         context: str | None = None,
         context_json: KosistenzContext | dict | None = None,
         session_id: str | None = None,
+        collection: str | None = None,
     ) -> tuple[SupervisorResult, str]:
         """Returns (result, session_id)."""
         payload = self._chat_payload(
@@ -91,6 +95,7 @@ class BrainClient:
             context=context,
             context_json=context_json,
             session_id=session_id,
+            collection=collection,
         )
         with httpx.Client(timeout=120.0) as client:
             r = client.post(
@@ -110,6 +115,7 @@ class BrainClient:
         context: str | None = None,
         context_json: KosistenzContext | dict | None = None,
         session_id: str | None = None,
+        collection: str | None = None,
     ) -> Iterator[dict[str, Any] | str]:
         """Yield parsed SSE payloads: meta dict, sources dict, token dict, then '[DONE]'."""
         payload = self._chat_payload(
@@ -117,6 +123,7 @@ class BrainClient:
             context=context,
             context_json=context_json,
             session_id=session_id,
+            collection=collection,
         )
         with httpx.Client(timeout=120.0) as client:
             with client.stream(
@@ -190,6 +197,7 @@ def chat_brain(
     context: str | None = None,
     context_json: KosistenzContext | dict | None = None,
     session_id: str | None = None,
+    collection: str | None = None,
 ) -> SupervisorResult:
     """Route chat through HTTP when CLUNY_BRAIN_URL is set, else in-process."""
     settings = settings or Settings.load()
@@ -200,6 +208,7 @@ def chat_brain(
             context=context,
             context_json=context_json,
             session_id=session_id,
+            collection=collection,
         )
         return result
     from cluny.chat_service import api_chat
@@ -210,6 +219,7 @@ def chat_brain(
         context=context,
         context_json=context_json,
         session_id=session_id,
+        collection=collection,
     )
     sources = tuple(
         SourceCitation(

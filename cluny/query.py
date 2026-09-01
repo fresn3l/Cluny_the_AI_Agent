@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 import re
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 
 from cluny.config import Settings
-from cluny.library_db import connect, fts_search, get_chunk_with_meta
+from cluny.library_db import connect, doc_ids_in_collection, fts_search, get_chunk_with_meta
 from cluny.ollama_client import OllamaClient
 from cluny.store import get_collection, query_raw
 
 EMPTY_INDEX_MESSAGE = (
     "No documents in the index yet. Use `cluny add`, `cluny add-dir`, or `cluny ingest-text` first."
 )
+
+EMPTY_COLLECTION_MESSAGE = (
+    "No documents in that collection yet. Add files with `cluny collection add`, "
+    "or choose a different collection."
+)
+
+_CROSS_ENCODER = None
+_CROSS_ENCODER_LOCK = threading.Lock()
 
 SYSTEM_PROMPT = (
     "You are Cluny, a local second-brain assistant. Answer using only the provided "
@@ -132,6 +141,42 @@ def _llm_rerank(
     return [c for c, _ in scored[:k]]
 
 
+def _get_cross_encoder():
+    """Load cross-encoder once per process (avoids cold-start on every rerank)."""
+    global _CROSS_ENCODER
+    if _CROSS_ENCODER is not None:
+        return _CROSS_ENCODER
+    with _CROSS_ENCODER_LOCK:
+        if _CROSS_ENCODER is None:
+            from sentence_transformers import CrossEncoder
+
+            _CROSS_ENCODER = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        return _CROSS_ENCODER
+
+
+def _resolve_doc_ids(
+    settings: Settings,
+    *,
+    collection_name: str | None = None,
+    doc_ids: frozenset[str] | None = None,
+) -> frozenset[str] | None:
+    """Merge explicit doc_ids with an optional named collection filter."""
+    if not collection_name or not collection_name.strip():
+        return doc_ids
+    conn = connect(settings)
+    coll_ids = doc_ids_in_collection(conn, collection_name.strip())
+    conn.close()
+    if doc_ids is not None:
+        return doc_ids & coll_ids
+    return coll_ids
+
+
+def _empty_rag_message(collection_name: str | None) -> str:
+    if collection_name and collection_name.strip():
+        return EMPTY_COLLECTION_MESSAGE
+    return EMPTY_INDEX_MESSAGE
+
+
 def _cross_rerank(
     chunks: list[RetrievedChunk],
     question: str,
@@ -142,11 +187,10 @@ def _cross_rerank(
     if len(chunks) <= k:
         return chunks
     try:
-        from sentence_transformers import CrossEncoder
+        model = _get_cross_encoder()
     except ImportError:
         return chunks[:k]
 
-    model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     pairs = [(question, ch.text[:512]) for ch in chunks]
     scores = model.predict(pairs)
     scored = sorted(zip(chunks, scores, strict=False), key=lambda x: float(x[1]), reverse=True)
@@ -167,6 +211,12 @@ def retrieve(
     pool = max(k, settings.retrieval_k)
     if settings.rerank_mode in ("llm", "cross"):
         pool = max(pool, k * 3)
+
+    doc_ids = _resolve_doc_ids(
+        settings, collection_name=collection_name, doc_ids=doc_ids
+    )
+    if collection_name and collection_name.strip() and doc_ids is not None and not doc_ids:
+        return []
 
     conn = connect(settings)
     fts_rows = fts_search(conn, question, limit=pool, doc_ids=doc_ids)
@@ -284,7 +334,7 @@ def rag_answer(
 
     if not chunks:
         return RagAnswer(
-            answer=EMPTY_INDEX_MESSAGE,
+            answer=_empty_rag_message(collection_name),
             sources=(),
             empty_index=True,
         )
@@ -302,6 +352,7 @@ def rag_answer_stream(
     *,
     k: int = 5,
     settings: Settings | None = None,
+    collection_name: str | None = None,
     doc_ids: frozenset[str] | None = None,
 ) -> tuple[Iterator[str], tuple[RagSource, ...], bool]:
     """
@@ -309,11 +360,19 @@ def rag_answer_stream(
     On empty index, iterator yields the empty message once.
     """
     settings = settings or Settings.from_env()
-    chunks = retrieve(question, k=k, settings=settings, doc_ids=doc_ids)
+    chunks = retrieve(
+        question,
+        k=k,
+        settings=settings,
+        collection_name=collection_name,
+        doc_ids=doc_ids,
+    )
 
     if not chunks:
+        msg = _empty_rag_message(collection_name)
+
         def _empty() -> Iterator[str]:
-            yield EMPTY_INDEX_MESSAGE
+            yield msg
 
         return _empty(), (), True
 
@@ -324,6 +383,7 @@ def rag_answer_stream(
 
 
 __all__ = [
+    "EMPTY_COLLECTION_MESSAGE",
     "EMPTY_INDEX_MESSAGE",
     "RagAnswer",
     "RagSource",
