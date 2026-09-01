@@ -24,4 +24,8 @@ if [[ ! -x "$REPO/.venv/bin/cluny" ]]; then
 fi
 
 cd "$REPO"
-exec "$REPO/run_cluny.sh" gui
+MODE="${CLUNY_APP_MODE:-widget}"
+if [[ "$MODE" == "full" ]] || [[ "${1:-}" == "--full" ]]; then
+  exec "$REPO/run_cluny.sh" widget --full
+fi
+exec "$REPO/run_cluny.sh" widget
