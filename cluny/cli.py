@@ -29,6 +29,7 @@ from cluny.library_db import (
     get_tags_for_doc,
     list_collections,
     list_documents,
+    list_inline_sources,
     list_tags,
     resolve_document,
 )
@@ -811,11 +812,14 @@ def library_list(
     collection: str | None = typer.Option(
         None, "--collection", "-c", help="Filter by collection name."
     ),
+    source: str | None = typer.Option(
+        None, "--source", "-s", help="Filter inline ingest source (e.g. kosistenz-journal)."
+    ),
 ) -> None:
     """List documents registered in the SQLite catalog."""
     settings = Settings.from_env()
     conn = connect(settings)
-    rows = list_documents(conn, tag=tag, collection=collection)
+    rows = list_documents(conn, tag=tag, collection=collection, source=source)
     for d in rows:
         tags = get_tags_for_doc(conn, d.id)
         colls = get_collections_for_doc(conn, d.id)

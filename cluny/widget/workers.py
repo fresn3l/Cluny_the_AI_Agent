@@ -105,7 +105,7 @@ class ProposeWorker(QRunnable):
             if client is None:
                 self.signals.error.emit("Brain HTTP client not configured (set CLUNY_BRAIN_URL).")
                 return
-            proposals = client.propose(
+            proposals, _sources = client.propose(
                 self._question,
                 context=self._context,
                 collection=self._collection,

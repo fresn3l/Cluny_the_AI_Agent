@@ -11,7 +11,7 @@ from cluny.brain_config import DEFAULT_PROMPTS, get_max_proposals, get_prompt
 from cluny.config import Settings
 from cluny.kosistenz_context import KosistenzContext
 from cluny.ollama_client import OllamaClient, OllamaError
-from cluny.query import RetrievedChunk, retrieve
+from cluny.query import RetrievedChunk, RagSource, retrieve
 from cluny.supervisor import format_chat_question
 
 PROPOSE_SYSTEM = DEFAULT_PROMPTS["propose_system"]
@@ -33,6 +33,41 @@ class WorkProposal:
             "due": self.due,
             "keywords": self.keywords,
         }
+
+
+@dataclass(frozen=True)
+class ProposalResult:
+    proposals: list[WorkProposal]
+    sources: tuple[RagSource, ...]
+
+
+def chunks_to_sources(chunks: list[RetrievedChunk], preview_len: int = 450) -> tuple[RagSource, ...]:
+    sources: list[RagSource] = []
+    for i, ch in enumerate(chunks):
+        snippet = ch.text.strip().replace("\n", " ")
+        if len(snippet) > preview_len:
+            snippet = snippet[: preview_len - 1] + "…"
+        sources.append(
+            RagSource(
+                label=ch.label or f"chunk {i + 1}",
+                snippet=snippet,
+                doc_path=ch.doc_path,
+                chunk_index=ch.chunk_index,
+            )
+        )
+    return tuple(sources)
+
+
+def source_dicts_from_rag_sources(sources: tuple[RagSource, ...]) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": s.label,
+            "snippet": s.snippet,
+            "doc_path": s.doc_path,
+            "chunk_index": s.chunk_index,
+        }
+        for s in sources
+    ]
 
 
 def format_retrieved_snippets(chunks: list[RetrievedChunk]) -> str | None:
@@ -103,7 +138,7 @@ def run_proposals(
     settings: Settings | None = None,
     collection: str | None = None,
     k: int = 5,
-) -> list[WorkProposal]:
+) -> ProposalResult:
     """Return structured work proposals grounded in Kosistenz context + indexed history."""
     settings = settings or Settings.load()
     chunks = retrieve(
@@ -126,4 +161,7 @@ def run_proposals(
     except (json.JSONDecodeError, TypeError, ValueError) as e:
         raise OllamaError(f"Could not parse proposal JSON: {e}") from e
     limit = get_max_proposals(settings=settings)
-    return proposals[:limit]
+    return ProposalResult(
+        proposals=proposals[:limit],
+        sources=chunks_to_sources(chunks),
+    )

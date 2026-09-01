@@ -107,7 +107,7 @@ If `CLUNY_API_TOKEN` is set, send `X-Cluny-Token: …` or `Authorization: Bearer
 | Ask (streaming) | `POST /chat/stream` or `POST /ask` | SSE tokens + citations for typing indicator |
 | Work proposals | `POST /propose` | Structured `{ title, estimate_minutes, due, keywords }[]` |
 | Deep tool loop | `POST /agent` | Modes: `knowledge`, `planner`, etc. |
-| Browse indexed docs | `GET /library` | Optional settings / debug UI |
+| Browse indexed docs | `GET /library` | Optional `?collection=` / `?source=` filters; settings / debug UI |
 
 ### Journal copy (on save)
 
@@ -249,6 +249,14 @@ POST /propose
       "due": "2026-09-04",
       "keywords": ["product", "agenda"]
     }
+  ],
+  "sources": [
+    {
+      "label": "2026-08-28 journal",
+      "snippet": "…",
+      "doc_path": "inline:kosistenz-journal:abc123",
+      "chunk_index": 2
+    }
   ]
 }
 ```
@@ -373,11 +381,11 @@ for try await event in client.chatStream(question: "Summarize my week", sessionI
 ### Work proposals
 
 ```swift
-let proposals = try await client.propose(
+let response = try await client.propose(
     question: "Prep for product sync",
     contextJSON: ctx
 )
-// Kosistenz creates real todos and runs the packer — Cluny only proposes
+// response.proposals → create todos; response.sources → citation chips
 ```
 
 ### Context fields

@@ -102,6 +102,11 @@ public struct ClunyChatResponse: Codable, Sendable {
     }
 }
 
+public struct ClunyProposeResponse: Codable, Sendable {
+    public let proposals: [ClunyProposal]
+    public let sources: [ClunySource]
+}
+
 public struct ClunyProposal: Codable, Sendable {
     public let title: String
     public let estimateMinutes: Int?
@@ -241,7 +246,7 @@ public struct ClunyBrainClient: Sendable {
         context: String? = nil,
         contextJSON: KosistenzContextPayload? = nil,
         collection: String? = nil
-    ) async throws -> [ClunyProposal] {
+    ) async throws -> ClunyProposeResponse {
         struct Body: Encodable {
             let question: String
             let context: String?
@@ -253,7 +258,6 @@ public struct ClunyBrainClient: Sendable {
                 case contextJson = "context_json"
             }
         }
-        struct Wrap: Decodable { let proposals: [ClunyProposal] }
         let payload = Body(
             question: question,
             context: context,
@@ -263,7 +267,7 @@ public struct ClunyBrainClient: Sendable {
         let body = try JSONEncoder().encode(payload)
         let (data, resp) = try await URLSession.shared.data(for: request(path: "propose", method: "POST", body: body))
         try validate(resp)
-        return try JSONDecoder().decode(Wrap.self, from: data).proposals
+        return try JSONDecoder().decode(ClunyProposeResponse.self, from: data)
     }
 
     /// After Kosistenz saves a journal file to disk.

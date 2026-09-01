@@ -25,8 +25,8 @@
 
 | Task | Notes |
 |------|-------|
-| Library filter by `source` / collection in standalone GUI | Browse `journal` vs `analytics` |
-| Return `sources[]` on `/propose` response | Citation chips in Kosistenz UI |
+| Library filter by `source` / collection in standalone GUI | Browse `journal` vs `analytics` — **done** |
+| Return `sources[]` on `/propose` response | Citation chips in Kosistenz UI — **done** |
 
 ---
 
