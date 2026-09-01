@@ -17,6 +17,8 @@ class UserConfig:
     hybrid_vector_weight: float = 0.5
     agent_mode: str = "ask"
     ask_collection: str = ""
+    standalone_mode: bool = False
+    first_run_complete: bool = False
 
     @classmethod
     def from_dict(cls, data: dict) -> UserConfig:
@@ -27,6 +29,8 @@ class UserConfig:
             hybrid_vector_weight=float(data.get("hybrid_vector_weight", 0.5)),
             agent_mode=str(data.get("agent_mode", "ask")),
             ask_collection=str(data.get("ask_collection", "")),
+            standalone_mode=bool(data.get("standalone_mode", False)),
+            first_run_complete=bool(data.get("first_run_complete", False)),
         )
 
 

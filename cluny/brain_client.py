@@ -148,8 +148,10 @@ class BrainClient:
         *,
         context: str | None = None,
         context_json: KosistenzContext | dict | None = None,
+        collection: str | None = None,
+        k: int = 5,
     ) -> list[dict[str, Any]]:
-        payload: dict[str, Any] = {"question": question}
+        payload: dict[str, Any] = {"question": question, "k": k}
         if context:
             payload["context"] = context
         if context_json is not None:
@@ -157,6 +159,8 @@ class BrainClient:
                 payload["context_json"] = context_json.model_dump(exclude_none=True)
             else:
                 payload["context_json"] = context_json
+        if collection:
+            payload["collection"] = collection
         with httpx.Client(timeout=120.0) as client:
             r = client.post(
                 f"{self.base_url}/propose",
@@ -166,12 +170,65 @@ class BrainClient:
             r.raise_for_status()
             return list(r.json().get("proposals") or [])
 
+    def brain_config_get(self) -> dict[str, Any]:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.get(f"{self.base_url}/brain/config", headers=self._headers())
+            r.raise_for_status()
+            return r.json()
+
+    def brain_config_put(
+        self,
+        *,
+        global_persona: str | None = None,
+        prompts: dict[str, str | None] | None = None,
+        behavior: dict[str, str | int | None] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if global_persona is not None:
+            payload["global_persona"] = global_persona
+        if prompts is not None:
+            payload["prompts"] = prompts
+        if behavior is not None:
+            payload["behavior"] = behavior
+        with httpx.Client(timeout=30.0) as client:
+            r = client.put(
+                f"{self.base_url}/brain/config",
+                json=payload,
+                headers=self._headers(),
+            )
+            r.raise_for_status()
+            return r.json()
+
+    def brain_config_reset(
+        self,
+        *,
+        prompt_key: str | None = None,
+        reset_behavior: bool = False,
+        reset_persona: bool = False,
+        reset_all: bool = False,
+    ) -> dict[str, Any]:
+        payload = {
+            "prompt_key": prompt_key,
+            "reset_behavior": reset_behavior,
+            "reset_persona": reset_persona,
+            "reset_all": reset_all,
+        }
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(
+                f"{self.base_url}/brain/config/reset",
+                json=payload,
+                headers=self._headers(),
+            )
+            r.raise_for_status()
+            return r.json()
+
     def ingest_text(
         self,
         text: str,
         *,
         source: str = "widget-capture",
         title: str | None = None,
+        collection: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "text": text,
@@ -180,6 +237,8 @@ class BrainClient:
         }
         if title:
             payload["title"] = title
+        if collection:
+            payload["collection"] = collection
         with httpx.Client(timeout=120.0) as client:
             r = client.post(
                 f"{self.base_url}/ingest/text",

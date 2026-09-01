@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from cluny.agent import run_agent
+from cluny.brain_config import DEFAULT_PROMPTS, get_prompt, get_supervisor_mode
 from cluny.config import Settings
 from cluny.kosistenz_context import KosistenzContext, merge_context
 from cluny.ollama_client import OllamaClient
@@ -30,14 +31,7 @@ _PLANNER_RE = re.compile(
     re.I,
 )
 
-ROUTER_SYSTEM = (
-    "Classify the user message into exactly one route. Reply with ONLY one word:\n"
-    "ask — general question answerable from retrieved notes in one shot\n"
-    "knowledge_agent — needs searching indexed notes with tools\n"
-    "tasks_agent — about to-do list, deadlines, completing tasks\n"
-    "calendar — meetings, schedule, appointments\n"
-    "planner — needs BOTH notes search AND task action (compound request)\n"
-)
+ROUTER_SYSTEM = DEFAULT_PROMPTS["router_system"]
 
 
 @dataclass(frozen=True)
@@ -89,7 +83,7 @@ def classify_intent_regex(question: str) -> Route:
 def classify_intent_llm(question: str, settings: Settings) -> Route:
     ollama = OllamaClient(settings)
     try:
-        raw = ollama.chat(system=ROUTER_SYSTEM, user=question.strip()).strip().lower()
+        raw = ollama.chat(system=get_prompt("router_system", settings=settings), user=question.strip()).strip().lower()
     except Exception:  # noqa: BLE001
         return classify_intent_regex(question)
     for route in ("planner", "calendar", "tasks_agent", "knowledge_agent", "ask"):
@@ -100,7 +94,7 @@ def classify_intent_llm(question: str, settings: Settings) -> Route:
 
 def classify_intent(question: str, settings: Settings | None = None) -> Route:
     settings = settings or Settings.load()
-    if settings.supervisor_mode == "regex":
+    if get_supervisor_mode(settings=settings) == "regex":
         return classify_intent_regex(question)
     return classify_intent_llm(question, settings)
 

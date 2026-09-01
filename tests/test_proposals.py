@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from cluny.proposals import _parse_proposals, run_proposals
+from cluny.proposals import (
+    RETRIEVED_SNIPPETS_HEADER,
+    WorkProposal,
+    _parse_proposals,
+    format_retrieved_snippets,
+    run_proposals,
+)
+from cluny.query import RetrievedChunk
 
 
 def test_parse_proposals_json():
@@ -15,10 +22,64 @@ def test_parse_proposals_json():
     assert items[0].estimate_minutes == 25
 
 
+def test_format_retrieved_snippets():
+    chunks = [
+        RetrievedChunk(
+            text="Felt burned out on Friday",
+            label="2026-08-28 journal",
+            doc_path=None,
+            chunk_index=0,
+            score=0.9,
+        )
+    ]
+    block = format_retrieved_snippets(chunks)
+    assert block is not None
+    assert RETRIEVED_SNIPPETS_HEADER in block
+    assert "burned out" in block
+
+
 def test_run_proposals_mocked(settings):
     raw = '{"proposals": [{"title": "Review PR", "estimate_minutes": 30, "due": null, "keywords": []}]}'
-    with patch("cluny.proposals.OllamaClient") as mock_cls:
+    chunks = [
+        RetrievedChunk(
+            text="Slipped three tasks last week",
+            label="analytics-2026-W35",
+            doc_path=None,
+            chunk_index=0,
+            score=0.8,
+        )
+    ]
+    with (
+        patch("cluny.proposals.retrieve", return_value=chunks) as mock_retrieve,
+        patch("cluny.proposals.OllamaClient") as mock_cls,
+    ):
         mock_cls.return_value.chat.return_value = raw
-        items = run_proposals("What should I do tomorrow?", settings=settings)
+        items = run_proposals(
+            "What should I change next week?",
+            settings=settings,
+            context_json={"analytics": {"tasks_slipped": 3}},
+            collection="journal",
+            k=3,
+        )
     assert len(items) == 1
     assert items[0].title == "Review PR"
+    mock_retrieve.assert_called_once()
+    call_kwargs = mock_retrieve.call_args.kwargs
+    assert call_kwargs["collection_name"] == "journal"
+    assert call_kwargs["k"] == 3
+    user_prompt = mock_cls.return_value.chat.call_args.kwargs["user"]
+    assert RETRIEVED_SNIPPETS_HEADER in user_prompt
+    assert "Slipped three tasks" in user_prompt
+
+
+def test_run_proposals_without_retrieval(settings):
+    raw = '{"proposals": [{"title": "Walk", "estimate_minutes": 15, "due": null, "keywords": []}]}'
+    with (
+        patch("cluny.proposals.retrieve", return_value=[]),
+        patch("cluny.proposals.OllamaClient") as mock_cls,
+    ):
+        mock_cls.return_value.chat.return_value = raw
+        items = run_proposals("Anything?", settings=settings)
+    assert items[0].title == "Walk"
+    user_prompt = mock_cls.return_value.chat.call_args.kwargs["user"]
+    assert RETRIEVED_SNIPPETS_HEADER not in user_prompt

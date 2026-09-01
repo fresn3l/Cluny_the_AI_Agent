@@ -121,11 +121,46 @@ Content-Type: application/json
   "text": "Today I worked on…",
   "catalog": true,
   "source": "kosistenz-journal",
-  "title": "2026-09-01 journal"
+  "title": "2026-09-01 journal",
+  "collection": "journal"
 }
 ```
 
+Optional `collection` tags the document in Cluny's library (`journal`, `analytics`, etc.) for scoped RAG.
+
 Requires Ollama for embedding. The on-disk journal in Kosistenz remains canonical; Cluny only indexes for RAG.
+
+### Analytics snapshot (live context)
+
+Send rolling or weekly analytics in `context_json` on `/chat` and `/propose`:
+
+```json
+{
+  "date": "2026-09-01",
+  "analytics": {
+    "period": "2026-W35",
+    "tasks_completed": 12,
+    "tasks_slipped": 3,
+    "focus_hours": 18.5,
+    "journal_streak_days": 14,
+    "goal_progress": [{ "goal": "Ship pack", "percent": 60 }]
+  },
+  "weekly_goals": ["Ship Kosistenz pack"]
+}
+```
+
+For long-term trends, also ingest weekly rollup text:
+
+```http
+POST /ingest/text
+{
+  "text": "Weekly analytics 2026-W35\nTasks completed: 12\nTasks slipped: 3",
+  "catalog": true,
+  "source": "kosistenz-analytics",
+  "title": "analytics-2026-W35",
+  "collection": "analytics"
+}
+```
 
 ### Ask with Kosistenz context
 
@@ -191,11 +226,17 @@ POST /agent
 
 ### Work proposals
 
+`/propose` retrieves relevant journal/analytics chunks (RAG) and merges them with live `context_json` before suggesting work items.
+
 ```http
 POST /propose
 {
   "question": "What should I tackle before the product sync?",
-  "context": "Open: write agenda (Thu). Meeting: Product sync Tue 2pm."
+  "context": "Open: write agenda (Thu). Meeting: Product sync Tue 2pm.",
+  "context_json": {
+    "analytics": { "tasks_slipped": 2, "period": "2026-W35" }
+  },
+  "collection": "journal"
 }
 ```
 
@@ -248,6 +289,9 @@ Kosistenz and other clients use **`cluny serve`** brain routes only:
 | `POST` | `/propose` | Work proposals from question + context |
 | `POST` | `/agent` | Tool loop |
 | `GET` | `/library` | Indexed documents (optional) |
+| `GET` | `/brain/config` | Effective brain instructions (prompts + behavior) |
+| `PUT` | `/brain/config` | Save `brain_config.json` overrides |
+| `POST` | `/brain/config/reset` | Reset prompts/behavior/persona |
 
 Task/calendar/context HTTP routes from Sprint 11 experiments were **removed** — Kosistenz owns those domains. Standalone Cluny still has `cluny tasks` and `cluny calendar` via CLI/widget.
 
@@ -341,9 +385,9 @@ let proposals = try await client.propose(
 | Field | Type | Purpose |
 |-------|------|---------|
 | `context` | string | Freeform Kosistenz snapshot |
-| `context_json` | object | Structured: `date`, `deadline_todos`, `events_today`, `weekly_goals`, `notes` |
+| `context_json` | object | Structured: `date`, `deadline_todos`, `events_today`, `weekly_goals`, `analytics`, `notes` |
 | `session_id` | string? | Omit on first message; pass back for multi-turn |
-| `collection` | string? | Limit RAG to a named library collection (e.g. `research`) |
+| `collection` | string? | Limit RAG to a named library collection (e.g. `journal`, `analytics`) |
 
 Cluny merges `context` + `context_json` into the prompt. Prefer `context_json` for the widget — cleaner than string concatenation in Swift.
 

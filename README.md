@@ -154,6 +154,30 @@ cluny gui
 
 That builds **Cluny.app** and installs it to `~/Applications/`. Launch from Spotlight or add to **Login Items**. Click the menu bar icon for the widget; tray menu → **Open full window** for the full UI. Re-run `install_app.sh` if you move the repo folder.
 
+**Standalone build (py2app, Sprint 12):** packages a repo-independent app with data in `~/Library/Application Support/Cluny` and HTTP brain on `127.0.0.1:8787`:
+
+```bash
+pip install -e ".[api,packaging]"
+./macos/build_py2app.sh
+open dist/Cluny.app
+./macos/create_dmg.sh   # optional: dist/Cluny.dmg with Applications shortcut
+```
+
+For dev, match packaged HTTP mode without py2app: `CLUNY_USE_HTTP_BRAIN=1 cluny widget` or `CLUNY_USE_HTTP_BRAIN=1 cluny gui`.
+
+**Settings:** File → Settings in the full window includes **Standalone mode** (menu bar Task tab vs Propose tab). Changes apply after restarting the widget.
+
+**Brain Editor:** **Brain → Edit instructions…** in the full GUI edits Cluny's system prompts, global persona, routing behavior, and models. Saved to `brain_config.json` under your data dir; changes apply on the next message. Use **Run preview** to test unsaved prompt text against Ollama.
+
+**Export / import:** **Brain → Export/Import brain config…** in the GUI, or:
+
+```bash
+cluny brain export ~/Desktop/brain_config.json
+cluny brain import ~/Desktop/brain_config.json
+```
+
+Share or back up your instruction overrides without copying the whole `.cluny` folder.
+
 | Surface | Best for |
 |---------|----------|
 | **Widget** | Quick ask, paste capture, add task, glance at stats |

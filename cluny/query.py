@@ -7,37 +7,32 @@ import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 
+from cluny.brain_config import (
+    DEFAULT_EMPTY_COLLECTION_MESSAGE,
+    DEFAULT_EMPTY_INDEX_MESSAGE,
+    DEFAULT_PROMPTS,
+    get_empty_collection_message,
+    get_empty_index_message,
+    get_prompt,
+    get_rag_user_template,
+)
 from cluny.config import Settings
 from cluny.library_db import connect, doc_ids_in_collection, fts_search, get_chunk_with_meta
 from cluny.ollama_client import OllamaClient
 from cluny.store import get_collection, query_raw
 
-EMPTY_INDEX_MESSAGE = (
-    "No documents in the index yet. Use `cluny add`, `cluny add-dir`, or `cluny ingest-text` first."
-)
+EMPTY_INDEX_MESSAGE = DEFAULT_EMPTY_INDEX_MESSAGE
 
-EMPTY_COLLECTION_MESSAGE = (
-    "No documents in that collection yet. Add files with `cluny collection add`, "
-    "or choose a different collection."
-)
+EMPTY_COLLECTION_MESSAGE = DEFAULT_EMPTY_COLLECTION_MESSAGE
 
 _CROSS_ENCODER = None
 _CROSS_ENCODER_LOCK = threading.Lock()
 
-SYSTEM_PROMPT = (
-    "You are Cluny, a local second-brain assistant. Answer using only the provided "
-    "context snippets from the user's indexed notes. If the answer is not in the context, "
-    "say you do not have that information in the indexed notes. Be concise. Cite which "
-    "snippet supports each claim when possible. Do not invent facts or claim you searched "
-    "the internet. If you are uncertain, say so rather than guessing."
-)
+SYSTEM_PROMPT = DEFAULT_PROMPTS["rag_system"]
 
-RAG_USER_TEMPLATE = "Context from indexed notes:\n\n{context}\n\nQuestion: {question}"
+RAG_USER_TEMPLATE = DEFAULT_PROMPTS["rag_user_template"]
 
-RERANK_SYSTEM = (
-    "Score how relevant each numbered snippet is to the question on a scale of 0-10. "
-    "Reply with ONLY comma-separated scores in snippet order (e.g. 8,3,9). No other text."
-)
+RERANK_SYSTEM = DEFAULT_PROMPTS["rerank_system"]
 
 
 @dataclass(frozen=True)
@@ -131,7 +126,7 @@ def _llm_rerank(
         lines.append(f"[{i + 1}] {preview}")
     user = f"Question: {question}\n\nSnippets:\n" + "\n\n".join(lines)
     try:
-        raw = ollama.chat(system=RERANK_SYSTEM, user=user)
+        raw = ollama.chat(system=get_prompt("rerank_system", settings=settings), user=user)
     except Exception:  # noqa: BLE001
         return chunks[:k]
     nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", raw)]
@@ -171,10 +166,10 @@ def _resolve_doc_ids(
     return coll_ids
 
 
-def _empty_rag_message(collection_name: str | None) -> str:
+def _empty_rag_message(collection_name: str | None, settings: Settings | None = None) -> str:
     if collection_name and collection_name.strip():
-        return EMPTY_COLLECTION_MESSAGE
-    return EMPTY_INDEX_MESSAGE
+        return get_empty_collection_message(settings=settings)
+    return get_empty_index_message(settings=settings)
 
 
 def _cross_rerank(
@@ -334,15 +329,16 @@ def rag_answer(
 
     if not chunks:
         return RagAnswer(
-            answer=_empty_rag_message(collection_name),
+            answer=_empty_rag_message(collection_name, settings),
             sources=(),
             empty_index=True,
         )
 
     context, sources = _chunks_to_sources(chunks)
-    user = RAG_USER_TEMPLATE.format(context=context, question=question)
+    template = get_rag_user_template(settings=settings)
+    user = template.format(context=context, question=question)
     ollama = OllamaClient(settings)
-    answer = ollama.chat(system=SYSTEM_PROMPT, user=user)
+    answer = ollama.chat(system=get_prompt("rag_system", settings=settings), user=user)
 
     return RagAnswer(answer=answer, sources=sources, empty_index=False)
 
@@ -369,7 +365,7 @@ def rag_answer_stream(
     )
 
     if not chunks:
-        msg = _empty_rag_message(collection_name)
+        msg = _empty_rag_message(collection_name, settings)
 
         def _empty() -> Iterator[str]:
             yield msg
@@ -377,9 +373,14 @@ def rag_answer_stream(
         return _empty(), (), True
 
     context, sources = _chunks_to_sources(chunks)
-    user = RAG_USER_TEMPLATE.format(context=context, question=question)
+    template = get_rag_user_template(settings=settings)
+    user = template.format(context=context, question=question)
     ollama = OllamaClient(settings)
-    return ollama.chat_stream(system=SYSTEM_PROMPT, user=user), sources, False
+    return (
+        ollama.chat_stream(system=get_prompt("rag_system", settings=settings), user=user),
+        sources,
+        False,
+    )
 
 
 __all__ = [

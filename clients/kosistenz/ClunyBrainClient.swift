@@ -28,6 +28,7 @@ public struct KosistenzContextPayload: Codable, Sendable {
     public var deadlineTodos: [DeadlineTodo]?
     public var eventsToday: [CalendarEvent]?
     public var weeklyGoals: [String]?
+    public var analytics: AnalyticsSnapshot?
     public var notes: String?
 
     public struct DeadlineTodo: Codable, Sendable {
@@ -41,11 +42,35 @@ public struct KosistenzContextPayload: Codable, Sendable {
         public var end: String?
     }
 
+    public struct GoalProgress: Codable, Sendable {
+        public var goal: String
+        public var percent: Double?
+    }
+
+    public struct AnalyticsSnapshot: Codable, Sendable {
+        public var period: String?
+        public var tasksCompleted: Int?
+        public var tasksSlipped: Int?
+        public var focusHours: Double?
+        public var journalStreakDays: Int?
+        public var goalProgress: [GoalProgress]?
+
+        enum CodingKeys: String, CodingKey {
+            case period
+            case tasksCompleted = "tasks_completed"
+            case tasksSlipped = "tasks_slipped"
+            case focusHours = "focus_hours"
+            case journalStreakDays = "journal_streak_days"
+            case goalProgress = "goal_progress"
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
         case date
         case deadlineTodos = "deadline_todos"
         case eventsToday = "events_today"
         case weeklyGoals = "weekly_goals"
+        case analytics
         case notes
     }
 }
@@ -214,24 +239,56 @@ public struct ClunyBrainClient: Sendable {
     public func propose(
         question: String,
         context: String? = nil,
-        contextJSON: KosistenzContextPayload? = nil
+        contextJSON: KosistenzContextPayload? = nil,
+        collection: String? = nil
     ) async throws -> [ClunyProposal] {
         struct Body: Encodable {
             let question: String
             let context: String?
             let contextJson: KosistenzContextPayload?
+            let collection: String?
 
             enum CodingKeys: String, CodingKey {
-                case question, context
+                case question, context, collection
                 case contextJson = "context_json"
             }
         }
         struct Wrap: Decodable { let proposals: [ClunyProposal] }
-        let payload = Body(question: question, context: context, contextJson: contextJSON)
+        let payload = Body(
+            question: question,
+            context: context,
+            contextJson: contextJSON,
+            collection: collection
+        )
         let body = try JSONEncoder().encode(payload)
         let (data, resp) = try await URLSession.shared.data(for: request(path: "propose", method: "POST", body: body))
         try validate(resp)
         return try JSONDecoder().decode(Wrap.self, from: data).proposals
+    }
+
+    /// After Kosistenz saves a journal file to disk.
+    public func indexJournalCopy(
+        text: String,
+        title: String,
+        collection: String = "journal"
+    ) async throws {
+        struct Body: Encodable {
+            let text: String
+            let catalog: Bool
+            let source: String
+            let title: String
+            let collection: String
+        }
+        let payload = Body(
+            text: text,
+            catalog: true,
+            source: "kosistenz-journal",
+            title: title,
+            collection: collection
+        )
+        let body = try JSONEncoder().encode(payload)
+        let (_, resp) = try await URLSession.shared.data(for: request(path: "ingest/text", method: "POST", body: body))
+        try validate(resp)
     }
 
     private func validate(_ response: URLResponse) throws {

@@ -8,6 +8,11 @@ from typing import Any
 import httpx
 
 from cluny.agent import run_agent
+from cluny.brain_config import (
+    apply_config_update,
+    effective_config,
+    reset_brain_config,
+)
 from cluny.chat_service import SessionNotFoundError, api_chat, api_chat_stream_events
 from cluny.config import Settings
 from cluny.documents import add_inline_text
@@ -46,6 +51,7 @@ class IngestTextRequest(BaseModel):
     source: str = "inline"
     catalog: bool = False
     title: str | None = None
+    collection: str | None = None
 
 
 class AgentRequest(BaseModel):
@@ -66,6 +72,8 @@ class ProposeRequest(BaseModel):
     question: str
     context: str | None = None
     context_json: KosistenzContext | None = None
+    collection: str | None = None
+    k: int = Field(default=5, ge=1, le=25)
 
 
 class TaskSyncRequest(BaseModel):
@@ -76,6 +84,19 @@ class TaskSyncRequest(BaseModel):
     notes: str | None = None
     project_id: str | None = None
     recurrence: str | None = None
+
+
+class BrainConfigPutRequest(BaseModel):
+    global_persona: str | None = None
+    prompts: dict[str, str | None] | None = None
+    behavior: dict[str, str | int | None] | None = None
+
+
+class BrainConfigResetRequest(BaseModel):
+    prompt_key: str | None = None
+    reset_behavior: bool = False
+    reset_persona: bool = False
+    reset_all: bool = False
 
 
 def _settings() -> Settings:
@@ -235,6 +256,7 @@ def create_app() -> FastAPI:
                     body.text,
                     source_label=body.source,
                     title=body.title,
+                    collection_name=body.collection,
                 )
                 return {
                     "doc_id": result.doc_id,
@@ -364,10 +386,47 @@ def create_app() -> FastAPI:
                 context=body.context,
                 context_json=body.context_json,
                 settings=settings,
+                collection=body.collection,
+                k=body.k,
             )
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
         return {"proposals": [p.to_dict() for p in proposals]}
+
+    @app.get("/brain/config", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def brain_config_get(settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        return effective_config(settings)
+
+    @app.put("/brain/config", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def brain_config_put(
+        body: BrainConfigPutRequest, settings: Settings = Depends(_settings)
+    ) -> dict[str, Any]:
+        try:
+            apply_config_update(
+                settings,
+                global_persona=body.global_persona if body.global_persona is not None else None,
+                prompts=body.prompts,
+                behavior=body.behavior,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return effective_config(settings)
+
+    @app.post("/brain/config/reset", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def brain_config_reset(
+        body: BrainConfigResetRequest, settings: Settings = Depends(_settings)
+    ) -> dict[str, Any]:
+        try:
+            reset_brain_config(
+                settings,
+                prompt_key=body.prompt_key,
+                reset_behavior=body.reset_behavior,
+                reset_persona=body.reset_persona,
+                reset_all=body.reset_all,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return effective_config(settings)
 
     return app
 

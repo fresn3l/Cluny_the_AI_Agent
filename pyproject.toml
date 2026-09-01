@@ -38,6 +38,9 @@ rerank = [
 backup = [
   "pyzipper>=0.3.6",
 ]
+packaging = [
+  "py2app>=0.28.0",
+]
 
 [project.scripts]
 cluny = "cluny.cli:main"

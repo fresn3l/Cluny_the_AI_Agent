@@ -6,9 +6,13 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from cluny.config import load_dotenv_if_present
+from cluny.app_mode import configure_app_environment
+from cluny.brain_service import ensure_brain_running, stop_spawned_serve
+from cluny.config import Settings, load_dotenv_if_present
 from cluny.gui.main_window import MainWindow
+from cluny.user_config import load_user_config, save_user_config
 from cluny.widget.tray import ClunyTray
+from cluny.widget.welcome import WelcomeDialog
 
 
 def _set_macos_dock_visible(visible: bool) -> None:
@@ -33,14 +37,33 @@ def _set_macos_dock_visible(visible: bool) -> None:
 
 def run_widget_app(*, start_full: bool = False) -> None:
     """Start menu bar widget; optionally open full window on launch."""
+    configure_app_environment()
     load_dotenv_if_present()
+
+    settings = Settings.load()
+    if settings.brain_url:
+        health = ensure_brain_running(settings)
+        if not health.ok:
+            print(f"Warning: brain not reachable: {health.message}", file=sys.stderr)
+
     app = QApplication(sys.argv)
     app.setApplicationName("Cluny")
     app.setApplicationDisplayName("Cluny")
     app.setOrganizationName("Cluny")
     app.setQuitOnLastWindowClosed(False)
 
-    _set_macos_dock_visible(start_full)
+    user_config = load_user_config(settings)
+    show_full = start_full
+
+    if not user_config.first_run_complete:
+        _set_macos_dock_visible(True)
+        dlg = WelcomeDialog()
+        if dlg.exec():
+            show_full = dlg.wants_library()
+        user_config.first_run_complete = True
+        save_user_config(settings, user_config)
+
+    _set_macos_dock_visible(show_full)
 
     main_window: MainWindow | None = None
 
@@ -57,12 +80,13 @@ def run_widget_app(*, start_full: bool = False) -> None:
     def quit_app() -> None:
         if main_window is not None:
             main_window.close()
+        stop_spawned_serve()
         app.quit()
 
     tray = ClunyTray(on_open_full=open_full_window, on_quit=quit_app)
     tray.show()
 
-    if start_full:
+    if show_full:
         open_full_window()
 
     sys.exit(app.exec())
