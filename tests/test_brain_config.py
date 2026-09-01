@@ -91,3 +91,29 @@ def test_preview_overrides_without_save(settings):
     )
     assert text == "Preview only."
     assert get_prompt("propose_system", settings=settings) == DEFAULT_PROMPTS["propose_system"]
+
+
+def test_apply_config_update_and_reset(settings):
+    from cluny.brain_config import apply_config_update, reset_brain_config
+
+    apply_config_update(
+        settings,
+        global_persona="Persona",
+        prompts={"router_system": "Route X."},
+        behavior={"max_proposals": 3},
+    )
+    cfg = load_brain_config(settings)
+    assert cfg.global_persona == "Persona"
+    assert cfg.prompts.router_system == "Route X."
+    assert cfg.behavior.max_proposals == 3
+    reset_brain_config(settings, prompt_key="router_system")
+    cfg = load_brain_config(settings)
+    assert cfg.prompts.router_system is None
+
+
+def test_override_from_editor(settings):
+    from cluny.brain_config import override_from_editor
+
+    assert override_from_editor("", "rag_system") is None
+    assert override_from_editor(DEFAULT_PROMPTS["rag_system"], "rag_system") is None
+    assert override_from_editor("Unique prompt", "rag_system") == "Unique prompt"

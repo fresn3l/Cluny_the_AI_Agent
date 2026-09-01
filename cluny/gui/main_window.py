@@ -36,6 +36,7 @@ from cluny.agent import run_agent
 from cluny.brain_client import BrainClient, chat_brain
 from cluny.config import Settings
 from cluny.documents import add_file
+from cluny.gui.brain_editor import open_brain_editor
 from cluny.library_db import (
     connect,
     document_count,
@@ -514,6 +515,11 @@ class MainWindow(QMainWindow):
         quit_a.triggered.connect(self.close)
         file_menu.addAction(quit_a)
 
+        brain_menu = bar.addMenu("&Brain")
+        edit_brain = QAction("&Edit instructions…", self)
+        edit_brain.triggered.connect(self._open_brain_editor)
+        brain_menu.addAction(edit_brain)
+
         help_menu = bar.addMenu("&Help")
         about = QAction("&About Cluny", self)
         about.triggered.connect(self._show_about)
@@ -604,6 +610,16 @@ class MainWindow(QMainWindow):
                 "Settings saved",
                 "Settings apply to the next message. "
                 "Restart the menu bar widget for standalone mode tab changes.",
+            )
+
+    def _open_brain_editor(self) -> None:
+        if open_brain_editor(self):
+            self._user_config = load_user_config(self._settings)
+            self._k_spin.setValue(self._user_config.retrieval_k)
+            QMessageBox.information(
+                self,
+                "Brain config saved",
+                "Instruction changes apply to the next message.",
             )
 
     def _build_input_row(self) -> QWidget:

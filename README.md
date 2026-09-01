@@ -167,6 +167,8 @@ For dev, match packaged HTTP mode without py2app: `CLUNY_USE_HTTP_BRAIN=1 cluny 
 
 **Settings:** File → Settings in the full window includes **Standalone mode** (menu bar Task tab vs Propose tab). Changes apply after restarting the widget.
 
+**Brain Editor:** **Brain → Edit instructions…** in the full GUI edits Cluny's system prompts, global persona, routing behavior, and models. Saved to `brain_config.json` under your data dir; changes apply on the next message. Use **Run preview** to test unsaved prompt text against Ollama.
+
 | Surface | Best for |
 |---------|----------|
 | **Widget** | Quick ask, paste capture, add task, glance at stats |

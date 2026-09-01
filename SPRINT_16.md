@@ -109,34 +109,29 @@ flowchart TB
 
 ### B — HTTP API (for packaged app + future remote editor)
 
-- [ ] `GET /brain/config` — returns effective config (defaults merged with overrides)
-- [ ] `PUT /brain/config` — validate + save `brain_config.json`
-- [ ] `POST /brain/config/reset` — reset all or one key
-- [ ] Tests in `tests/test_brain_config_api.py`
+- [x] `GET /brain/config` — returns effective config (defaults merged with overrides)
+- [x] `PUT /brain/config` — validate + save `brain_config.json`
+- [x] `POST /brain/config/reset` — reset all or one key
+- [x] Tests in `tests/test_brain_config_api.py`
 
 ### C — GUI: Brain Editor window
 
-- [ ] New menu: **Brain → Edit instructions…** (or dedicated **Brain** sidebar tab)
-- [ ] **Prompt editor** — `QTextEdit` per route with label + “Reset section”
-- [ ] **Behavior** panel — supervisor mode, max proposals, retrieval k / hybrid (reuse Settings fields)
-- [ ] **Models** panel — chat + embed model (migrate from scattered Settings dialog)
-- [ ] Save / Cancel / Reset all with confirmation
-- [ ] Status line: “Changes apply to the next message”
-
-**Entry:** extend `cluny/gui/main_window.py` or `cluny/gui/brain_editor.py`
+- [x] New menu: **Brain → Edit instructions…** (`cluny/gui/brain_editor.py`)
+- [x] **Prompt editor** — `QTextEdit` per route with label + “Reset section”
+- [x] **Behavior** panel — supervisor mode, max proposals, empty-index messages
+- [x] **Models** panel — chat + embed model, retrieval k / hybrid (saves `user_config.json`)
+- [x] Save / Cancel / Reset all with confirmation
 
 ### D — Live preview
 
-- [ ] “Test this prompt” strip at bottom of Brain Editor
-- [ ] Sample question dropdown (“Summarize my notes”, “What should I do tomorrow?”)
-- [ ] Runs Ask **with current unsaved editor text** (does not persist until Save)
-- [ ] Shows route + streamed answer in a small preview pane
+- [x] “Run preview” strip with sample question (uses active prompt tab, unsaved text)
+- [ ] Sample question presets dropdown (optional)
 
 ### E — Polish + docs
 
+- [x] Packaged app: Brain Editor uses `/brain/config` when `CLUNY_BRAIN_URL` is set
 - [ ] README section: Brain Editor
-- [ ] Export/import `brain_config.json` (File → Export brain config…)
-- [ ] Packaged app: Brain Editor works over HTTP brain (`CLUNY_BRAIN_URL`) via `/brain/config`
+- [ ] Export/import `brain_config.json`
 
 ---
 

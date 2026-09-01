@@ -343,5 +343,92 @@ def effective_config(settings: Settings | None = None) -> dict[str, Any]:
             "empty_index_message": get_empty_index_message(settings=settings, config=cfg),
             "empty_collection_message": get_empty_collection_message(settings=settings, config=cfg),
         },
+        "behavior_overrides": cfg.behavior.to_dict(),
         "defaults": dict(DEFAULT_PROMPTS),
     }
+
+
+PROMPT_LABELS: dict[str, str] = {
+    "rag_system": "RAG / Ask system",
+    "rag_user_template": "RAG user template",
+    "rerank_system": "Rerank scorer",
+    "propose_system": "Work proposals",
+    "router_system": "Intent router",
+    "knowledge_agent_system": "Knowledge agent",
+    "tasks_agent_system": "Tasks agent",
+    "all_agent_system": "All-tools agent",
+    "planner_agent_system": "Planner agent",
+}
+
+
+def editor_text_for_prompt(key: str, cfg: BrainConfig) -> str:
+    """Text shown in the editor (override or shipped default, without persona)."""
+    override = cfg.prompts.get_override(key)
+    return override if override is not None else DEFAULT_PROMPTS[key]
+
+
+def override_from_editor(text: str, key: str) -> str | None:
+    """Persist editor content: blank or unchanged default → None (use shipped default)."""
+    stripped = text.strip()
+    if not stripped:
+        return None
+    if stripped == DEFAULT_PROMPTS[key]:
+        return None
+    return stripped
+
+
+def apply_config_update(
+    settings: Settings,
+    *,
+    global_persona: str | None = None,
+    prompts: dict[str, str | None] | None = None,
+    behavior: dict[str, Any] | None = None,
+) -> BrainConfig:
+    """Merge partial updates into brain_config.json."""
+    cfg = load_brain_config(settings)
+    if global_persona is not None:
+        cfg.global_persona = global_persona
+    if prompts is not None:
+        current = cfg.prompts.to_dict()
+        for key, val in prompts.items():
+            if key not in PROMPT_KEYS:
+                raise ValueError(f"Unknown prompt key: {key}")
+            current[key] = val if val else None
+        cfg.prompts = BrainPromptOverrides.from_dict(current)
+    if behavior is not None:
+        merged = cfg.behavior.to_dict()
+        for key, val in behavior.items():
+            if key not in merged:
+                raise ValueError(f"Unknown behavior key: {key}")
+            merged[key] = val
+        cfg.behavior = BrainBehavior.from_dict(merged)
+    save_brain_config(settings, cfg)
+    return cfg
+
+
+def reset_brain_config(
+    settings: Settings,
+    *,
+    prompt_key: str | None = None,
+    reset_behavior: bool = False,
+    reset_persona: bool = False,
+    reset_all: bool = False,
+) -> BrainConfig:
+    """Clear overrides (all, one prompt, behavior, or persona)."""
+    if reset_all:
+        cfg = default_brain_config()
+        save_brain_config(settings, cfg)
+        return cfg
+
+    cfg = load_brain_config(settings)
+    if reset_persona:
+        cfg.global_persona = ""
+    if reset_behavior:
+        cfg.behavior = BrainBehavior()
+    if prompt_key:
+        if prompt_key not in PROMPT_KEYS:
+            raise ValueError(f"Unknown prompt key: {prompt_key}")
+        setattr(cfg.prompts, prompt_key, None)
+    save_brain_config(settings, cfg)
+    return cfg
+
