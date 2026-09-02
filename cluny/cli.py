@@ -59,6 +59,7 @@ collection_app = typer.Typer(help="Organize documents into collections.")
 calendar_app = typer.Typer(help="Read-only calendar from imported ICS files.")
 backup_app = typer.Typer(help="Backup and restore data snapshots.")
 brain_app = typer.Typer(help="Export and import Cluny brain instructions.")
+telegram_app = typer.Typer(help="Telegram capture bot (text notes from your phone).")
 app.add_typer(library_app, name="library")
 app.add_typer(tag_app, name="tag")
 app.add_typer(tasks_app, name="tasks")
@@ -66,6 +67,7 @@ app.add_typer(collection_app, name="collection")
 app.add_typer(calendar_app, name="calendar")
 app.add_typer(backup_app, name="backup")
 app.add_typer(brain_app, name="brain")
+app.add_typer(telegram_app, name="telegram")
 
 
 def _echo_index_result(n: int, doc_id: str, unchanged: bool) -> None:
@@ -1219,6 +1221,22 @@ def serve() -> None:
     settings = Settings.load()
     typer.echo(f"Serving Cluny API at http://{settings.api_bind_host}:{settings.api_port}")
     api_serve(settings)
+
+
+@telegram_app.command("run")
+def telegram_run() -> None:
+    """Run Telegram long-poll bot; text messages are indexed into Cluny."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    settings = Settings.load()
+    try:
+        from cluny.telegram_bot import run_bot
+
+        run_bot(settings)
+    except RuntimeError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    except KeyboardInterrupt:
+        typer.echo("\nStopped.")
 
 
 def main() -> None:

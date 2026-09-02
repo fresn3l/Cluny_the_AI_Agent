@@ -13,6 +13,7 @@ from cluny.brain_config import (
     effective_config,
     reset_brain_config,
 )
+from cluny.capture import capture_note
 from cluny.chat_service import SessionNotFoundError, api_chat, api_chat_stream_events
 from cluny.config import Settings
 from cluny.documents import add_inline_text
@@ -51,6 +52,13 @@ class IngestTextRequest(BaseModel):
     source: str = "inline"
     catalog: bool = False
     title: str | None = None
+    collection: str | None = None
+
+
+class CaptureRequest(BaseModel):
+    text: str
+    title: str | None = None
+    source: str | None = None
     collection: str | None = None
 
 
@@ -277,6 +285,25 @@ def create_app() -> FastAPI:
             return {"chunk_count": n, "catalog": False}
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
+
+    @app.post("/capture", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def capture(body: CaptureRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        """Index a short note from phone/Telegram (catalog + default collection)."""
+        if not body.text.strip():
+            raise HTTPException(status_code=400, detail="text cannot be empty")
+        try:
+            result = capture_note(
+                body.text,
+                settings=settings,
+                title=body.title,
+                source=body.source,
+                collection=body.collection,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except OllamaError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        return result.to_dict()
 
     @app.get("/library", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def library(
