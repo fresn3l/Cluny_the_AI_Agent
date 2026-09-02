@@ -19,14 +19,19 @@ from cluny.config import Settings
 from cluny.documents import add_inline_text
 from cluny.gui_api import (
     apply_user_config_update,
+    create_library_collection,
     create_session_payload,
+    delete_library_collection,
     delete_library_doc,
     ingest_uploaded_file,
     library_collections,
+    library_document_detail,
     library_documents_payload,
+    library_search_payload,
     session_messages_payload,
     sessions_list,
     stats_payload,
+    update_library_document,
     user_config_payload,
 )
 from cluny.kosistenz_context import KosistenzContext
@@ -131,6 +136,16 @@ class UserConfigPutRequest(BaseModel):
 
 class SessionCreateRequest(BaseModel):
     title: str | None = None
+
+
+class LibraryUpdateRequest(BaseModel):
+    title: str | None = None
+    collections: list[str] | None = None
+    tags: list[str] | None = None
+
+
+class CollectionCreateRequest(BaseModel):
+    name: str
 
 
 def _settings() -> Settings:
@@ -341,6 +356,49 @@ def create_app() -> FastAPI:
     def library_collections_route(settings: Settings = Depends(_settings)) -> dict[str, Any]:
         return library_collections(settings)
 
+    @app.post("/library/collections", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def library_collections_create(
+        body: CollectionCreateRequest,
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        try:
+            return create_library_collection(settings, body.name)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.delete(
+        "/library/collections/{name}",
+        dependencies=[Depends(_check_auth)],
+        tags=["Brain"],
+    )
+    def library_collections_delete(
+        name: str,
+        force: bool = False,
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        try:
+            return delete_library_collection(settings, name, force=force)
+        except ValueError as e:
+            msg = str(e)
+            status = 409 if "not empty" in msg else 404
+            raise HTTPException(status_code=status, detail=msg) from e
+
+    @app.get("/library/search", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def library_search(
+        q: str = "",
+        collection: str | None = None,
+        source: str | None = None,
+        limit: int = 50,
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        return library_search_payload(
+            settings,
+            q=q,
+            collection=collection,
+            source=source,
+            limit=limit,
+        )
+
     @app.get("/library", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def library(
         collection: str | None = None,
@@ -348,6 +406,27 @@ def create_app() -> FastAPI:
         settings: Settings = Depends(_settings),
     ) -> dict[str, Any]:
         return library_documents_payload(settings, collection=collection, source=source)
+
+    @app.get("/library/{doc_id}", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def library_get(doc_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        try:
+            return library_document_detail(settings, doc_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.patch("/library/{doc_id}", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def library_patch(
+        doc_id: str,
+        body: LibraryUpdateRequest,
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        data = body.model_dump(exclude_unset=True)
+        if not data:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        try:
+            return update_library_document(settings, doc_id, data)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.delete("/library/{doc_id}", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def library_delete(doc_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:

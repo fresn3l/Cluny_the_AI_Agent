@@ -469,3 +469,168 @@ def duplicate_hash_groups(conn: sqlite3.Connection) -> dict[str, list[DocumentRo
         h = str(row[0])
         groups[h] = find_by_content_hash(conn, h)
     return groups
+
+
+def update_document_title(conn: sqlite3.Connection, doc_id: str, title: str | None) -> None:
+    cleaned = title.strip() if title else None
+    cur = conn.execute(
+        "UPDATE documents SET title = ? WHERE id = ?",
+        (cleaned or None, doc_id),
+    )
+    if cur.rowcount == 0:
+        raise ValueError(f"No document matching: {doc_id!r}")
+    conn.commit()
+
+
+def set_document_collections(
+    conn: sqlite3.Connection,
+    doc_id: str,
+    collection_names: list[str],
+) -> None:
+    if get_by_id(conn, doc_id) is None:
+        raise ValueError(f"No document matching: {doc_id!r}")
+    conn.execute("DELETE FROM document_collections WHERE doc_id = ?", (doc_id,))
+    for raw in collection_names:
+        name = raw.strip()
+        if not name:
+            continue
+        conn.execute("INSERT OR IGNORE INTO collections (name) VALUES (?)", (name,))
+        cur = conn.execute(
+            "SELECT id FROM collections WHERE name = ? COLLATE NOCASE",
+            (name,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError(f"Collection not found: {name!r}")
+        conn.execute(
+            "INSERT OR IGNORE INTO document_collections (doc_id, collection_id) VALUES (?, ?)",
+            (doc_id, int(row[0])),
+        )
+    conn.commit()
+
+
+def remove_doc_from_collection(
+    conn: sqlite3.Connection,
+    doc_id: str,
+    collection_name: str,
+) -> None:
+    cur = conn.execute(
+        """
+        DELETE FROM document_collections
+        WHERE doc_id = ? AND collection_id = (
+            SELECT id FROM collections WHERE name = ? COLLATE NOCASE
+        )
+        """,
+        (doc_id, collection_name.strip()),
+    )
+    conn.commit()
+    if cur.rowcount == 0:
+        raise ValueError(
+            f"Document {doc_id!r} is not in collection {collection_name!r}"
+        )
+
+
+def set_document_tags(
+    conn: sqlite3.Connection,
+    doc_id: str,
+    tag_names: list[str],
+) -> None:
+    if get_by_id(conn, doc_id) is None:
+        raise ValueError(f"No document matching: {doc_id!r}")
+    conn.execute("DELETE FROM document_tags WHERE doc_id = ?", (doc_id,))
+    for raw in tag_names:
+        name = raw.strip()
+        if not name:
+            continue
+        conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (name,))
+        cur = conn.execute("SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (name,))
+        row = cur.fetchone()
+        if row is None:
+            raise ValueError(f"Could not create tag: {name!r}")
+        conn.execute(
+            "INSERT OR IGNORE INTO document_tags (doc_id, tag_id) VALUES (?, ?)",
+            (doc_id, int(row[0])),
+        )
+    conn.commit()
+
+
+def delete_collection(
+    conn: sqlite3.Connection,
+    name: str,
+    *,
+    force: bool = False,
+) -> None:
+    n = name.strip()
+    if not n:
+        raise ValueError("Collection name cannot be empty.")
+    cur = conn.execute(
+        "SELECT id FROM collections WHERE name = ? COLLATE NOCASE",
+        (n,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise ValueError(f"Collection not found: {n!r}")
+    coll_id = int(row[0])
+    cur = conn.execute(
+        "SELECT COUNT(*) FROM document_collections WHERE collection_id = ?",
+        (coll_id,),
+    )
+    doc_count = int(cur.fetchone()[0])
+    if doc_count > 0 and not force:
+        raise ValueError(f"Collection {n!r} is not empty ({doc_count} document(s)).")
+    if force:
+        conn.execute(
+            "DELETE FROM document_collections WHERE collection_id = ?",
+            (coll_id,),
+        )
+    conn.execute("DELETE FROM collections WHERE id = ?", (coll_id,))
+    conn.commit()
+
+
+def search_documents(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    collection: str | None = None,
+    source: str | None = None,
+    limit: int = 50,
+) -> list[DocumentRow]:
+    q = query.strip()
+    if not q:
+        return list_documents(conn, collection=collection, source=source)[:limit]
+    pattern = f"%{q}%"
+    if collection:
+        cur = conn.execute(
+            """
+            SELECT d.* FROM documents d
+            JOIN document_collections dc ON d.id = dc.doc_id
+            JOIN collections c ON dc.collection_id = c.id
+            WHERE c.name = ? COLLATE NOCASE
+              AND (d.title LIKE ? OR d.path LIKE ?)
+            ORDER BY d.ingested_at DESC
+            LIMIT ?
+            """,
+            (collection.strip(), pattern, pattern, limit),
+        )
+    elif source:
+        cur = conn.execute(
+            """
+            SELECT * FROM documents
+            WHERE path LIKE ?
+              AND (title LIKE ? OR path LIKE ?)
+            ORDER BY ingested_at DESC
+            LIMIT ?
+            """,
+            (f"inline:{source.strip()}:%", pattern, pattern, limit),
+        )
+    else:
+        cur = conn.execute(
+            """
+            SELECT * FROM documents
+            WHERE title LIKE ? OR path LIKE ?
+            ORDER BY ingested_at DESC
+            LIMIT ?
+            """,
+            (pattern, pattern, limit),
+        )
+    return [_row_to_doc(r) for r in cur.fetchall()]

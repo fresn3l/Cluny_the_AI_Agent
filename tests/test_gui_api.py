@@ -89,6 +89,78 @@ def test_library_delete_not_found(client: TestClient):
     assert r.status_code == 404
 
 
+def test_library_get_patch_and_collections(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    from cluny.config import Settings
+    from cluny.library_db import (
+        add_doc_to_collection,
+        connect,
+        upsert_document,
+    )
+
+    settings = Settings.load()
+    conn = connect(settings)
+    upsert_document(
+        conn,
+        "abc123def456",
+        "inline:test:hash1",
+        "inline",
+        "Sample Doc",
+        "hash1",
+        12,
+        2,
+    )
+    add_doc_to_collection(conn, "abc123def456", "journal")
+    conn.close()
+
+    got = client.get("/library/abc123")
+    assert got.status_code == 200
+    data = got.json()
+    assert data["title"] == "Sample Doc"
+    assert "journal" in data["collections"]
+
+    patched = client.patch(
+        "/library/abc123",
+        json={"title": "Renamed", "collections": ["work"], "tags": ["notes"]},
+    )
+    assert patched.status_code == 200
+    body = patched.json()
+    assert body["title"] == "Renamed"
+    assert body["collections"] == ["work"]
+    assert body["tags"] == ["notes"]
+
+    created = client.post("/library/collections", json={"name": "archive"})
+    assert created.status_code == 200
+    assert "archive" in created.json()["collections"]
+
+    deleted = client.delete("/library/collections/archive")
+    assert deleted.status_code == 200
+    assert "archive" not in deleted.json()["collections"]
+
+
+def test_library_search(client: TestClient):
+    from cluny.config import Settings
+    from cluny.library_db import connect, upsert_document
+
+    settings = Settings.load()
+    conn = connect(settings)
+    upsert_document(
+        conn,
+        "searchdoc1",
+        "inline:search:abc",
+        "inline",
+        "Find Me",
+        "abc",
+        5,
+        1,
+    )
+    conn.close()
+
+    r = client.get("/library/search", params={"q": "Find"})
+    assert r.status_code == 200
+    ids = [d["id"] for d in r.json()["documents"]]
+    assert "searchdoc1" in ids
+
+
 def test_health_includes_stats_fields(client: TestClient):
     r = client.get("/health")
     assert r.status_code == 200

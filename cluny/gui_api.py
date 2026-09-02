@@ -11,13 +11,21 @@ from cluny.documents import add_file, delete_document
 from cluny.extract import ExtractionError
 from cluny.library_db import (
     connect,
+    create_collection,
+    delete_collection,
     document_count,
+    get_by_id,
     get_collections_for_doc,
+    get_tags_for_doc,
     inline_source_from_path,
     list_collections,
     list_documents,
     list_inline_sources,
     resolve_document,
+    search_documents,
+    set_document_collections,
+    set_document_tags,
+    update_document_title,
 )
 from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.sessions import (
@@ -124,6 +132,107 @@ def library_documents_payload(
         )
     conn.close()
     return {"documents": payload, "collection": collection, "source": source}
+
+
+def _document_payload(conn, doc) -> dict[str, Any]:
+    return {
+        "id": doc.id,
+        "path": doc.path,
+        "kind": doc.kind,
+        "title": doc.title,
+        "chunk_count": doc.chunk_count,
+        "size_bytes": doc.size_bytes,
+        "ingested_at": doc.ingested_at,
+        "source": inline_source_from_path(doc.path),
+        "collections": get_collections_for_doc(conn, doc.id),
+        "tags": get_tags_for_doc(conn, doc.id),
+    }
+
+
+def library_document_detail(settings: Settings, doc_id: str) -> dict[str, Any]:
+    conn = connect(settings)
+    doc = resolve_document(conn, doc_id)
+    if doc is None:
+        conn.close()
+        raise ValueError(f"No document matching: {doc_id!r}")
+    payload = _document_payload(conn, doc)
+    conn.close()
+    return payload
+
+
+def update_library_document(
+    settings: Settings,
+    doc_id: str,
+    data: dict[str, Any],
+) -> dict[str, Any]:
+    conn = connect(settings)
+    doc = resolve_document(conn, doc_id)
+    if doc is None:
+        conn.close()
+        raise ValueError(f"No document matching: {doc_id!r}")
+    resolved_id = doc.id
+    if data.get("title") is not None:
+        update_document_title(conn, resolved_id, str(data["title"]))
+    if data.get("collections") is not None:
+        names = [str(n) for n in data["collections"]]
+        set_document_collections(conn, resolved_id, names)
+    if data.get("tags") is not None:
+        tags = [str(t) for t in data["tags"]]
+        set_document_tags(conn, resolved_id, tags)
+    doc = get_by_id(conn, resolved_id)
+    if doc is None:
+        conn.close()
+        raise ValueError(f"No document matching: {doc_id!r}")
+    payload = _document_payload(conn, doc)
+    conn.close()
+    return payload
+
+
+def create_library_collection(settings: Settings, name: str) -> dict[str, Any]:
+    conn = connect(settings)
+    create_collection(conn, name)
+    collections = list_collections(conn)
+    conn.close()
+    return {"name": name.strip(), "collections": collections}
+
+
+def delete_library_collection(
+    settings: Settings,
+    name: str,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    conn = connect(settings)
+    delete_collection(conn, name, force=force)
+    collections = list_collections(conn)
+    conn.close()
+    return {"deleted": True, "name": name.strip(), "collections": collections}
+
+
+def library_search_payload(
+    settings: Settings,
+    *,
+    q: str,
+    collection: str | None = None,
+    source: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    conn = connect(settings)
+    docs = search_documents(
+        conn,
+        q,
+        collection=collection,
+        source=source,
+        limit=min(max(limit, 1), 200),
+    )
+    payload = [_document_payload(conn, d) for d in docs]
+    conn.close()
+    return {
+        "documents": payload,
+        "q": q,
+        "collection": collection,
+        "source": source,
+    }
 
 
 def delete_library_doc(settings: Settings, doc_id: str) -> dict[str, Any]:
