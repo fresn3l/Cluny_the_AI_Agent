@@ -46,4 +46,8 @@ def settings(tmp_path: Path) -> Settings:
         backup_dir=tmp_path / "backups",
         kosistenz_journal_dir=None,
         brain_url="",
+        capture_source="telegram-capture",
+        capture_collection="capture",
+        telegram_bot_token="",
+        telegram_allowed_user_ids=frozenset({12345}),
     )

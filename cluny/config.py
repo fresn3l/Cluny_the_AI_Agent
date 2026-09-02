@@ -26,6 +26,19 @@ def _float(key: str, default: float) -> float:
         return default
 
 
+def _int_set(key: str) -> frozenset[int]:
+    out: set[int] = set()
+    for part in _get(key, "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.add(int(part))
+        except ValueError:
+            continue
+    return frozenset(out)
+
+
 def _host_set(key: str) -> frozenset[str]:
     return frozenset(x.strip().lower() for x in _get(key, "").split(",") if x.strip())
 
@@ -107,6 +120,10 @@ class Settings:
     backup_dir: Path
     kosistenz_journal_dir: Path | None
     brain_url: str
+    capture_source: str
+    capture_collection: str
+    telegram_bot_token: str
+    telegram_allowed_user_ids: frozenset[int]
 
     @property
     def catalog_root(self) -> Path:
@@ -170,6 +187,9 @@ class Settings:
 
         brain_url = _get("CLUNY_BRAIN_URL", "").strip().rstrip("/")
 
+        capture_source = _get("CLUNY_CAPTURE_SOURCE", "telegram-capture")
+        capture_collection = _get("CLUNY_CAPTURE_COLLECTION", "capture")
+
         return cls(
             ollama_base_url=_get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/"),
             chat_model=_get("OLLAMA_CHAT_MODEL", "llama3.2"),
@@ -208,4 +228,8 @@ class Settings:
             backup_dir=backup_p,
             kosistenz_journal_dir=kosistenz_journal,
             brain_url=brain_url,
+            capture_source=capture_source,
+            capture_collection=capture_collection,
+            telegram_bot_token=_get("CLUNY_TELEGRAM_BOT_TOKEN", ""),
+            telegram_allowed_user_ids=_int_set("CLUNY_TELEGRAM_ALLOWED_USER_IDS"),
         )

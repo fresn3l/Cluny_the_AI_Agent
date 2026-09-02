@@ -265,11 +265,33 @@ def fts_search(
     return rows[:limit]
 
 
+def inline_source_from_path(path: str) -> str | None:
+    """Extract inline ingest source label from catalog path ``inline:{source}:{hash}``."""
+    if not path.startswith("inline:"):
+        return None
+    rest = path[len("inline:") :]
+    colon = rest.find(":")
+    if colon <= 0:
+        return None
+    return rest[:colon]
+
+
+def list_inline_sources(conn: sqlite3.Connection) -> list[str]:
+    cur = conn.execute("SELECT path FROM documents WHERE path LIKE 'inline:%'")
+    names: set[str] = set()
+    for row in cur.fetchall():
+        src = inline_source_from_path(str(row[0]))
+        if src:
+            names.add(src)
+    return sorted(names, key=str.casefold)
+
+
 def list_documents(
     conn: sqlite3.Connection,
     *,
     tag: str | None = None,
     collection: str | None = None,
+    source: str | None = None,
 ) -> list[DocumentRow]:
     if collection:
         cur = conn.execute(
@@ -282,6 +304,21 @@ def list_documents(
             """,
             (collection.strip(),),
         )
+        rows = [_row_to_doc(r) for r in cur.fetchall()]
+        if source:
+            prefix = f"inline:{source.strip()}:"
+            rows = [d for d in rows if d.path.startswith(prefix)]
+        return rows
+    if source:
+        cur = conn.execute(
+            """
+            SELECT * FROM documents
+            WHERE path LIKE ?
+            ORDER BY ingested_at DESC
+            """,
+            (f"inline:{source.strip()}:%",),
+        )
+        return [_row_to_doc(r) for r in cur.fetchall()]
     elif tag:
         cur = conn.execute(
             """

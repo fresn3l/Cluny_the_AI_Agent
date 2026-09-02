@@ -46,8 +46,10 @@ from cluny.library_db import (
     document_count,
     get_collections_for_doc,
     get_tags_for_doc,
+    inline_source_from_path,
     list_collections,
     list_documents,
+    list_inline_sources,
 )
 from cluny.ollama_client import OllamaError
 from cluny.query import RagAnswer, RagSource, rag_answer_stream
@@ -480,7 +482,9 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._restore_transcript()
         self._refresh_stats()
+        self._refresh_library_filters()
         self._refresh_library()
+        self._refresh_collections()
         self._k_spin.setValue(self._user_config.retrieval_k)
         idx = {"ask": 0, "chat": 1, "knowledge": 2, "tasks": 3, "all": 4, "planner": 5}.get(
             self._user_config.agent_mode, 0
@@ -571,6 +575,16 @@ class MainWindow(QMainWindow):
         v.addWidget(refresh)
 
         v.addWidget(QLabel("Library"))
+        self._library_collection_combo = QComboBox()
+        self._library_collection_combo.addItem("(all collections)", "")
+        self._library_collection_combo.currentIndexChanged.connect(self._refresh_library)
+        v.addWidget(self._library_collection_combo)
+
+        self._library_source_combo = QComboBox()
+        self._library_source_combo.addItem("(all sources)", "")
+        self._library_source_combo.currentIndexChanged.connect(self._refresh_library)
+        v.addWidget(self._library_source_combo)
+
         self._doc_list = QListWidget()
         self._doc_list.setMaximumHeight(180)
         self._doc_list.itemClicked.connect(self._on_doc_clicked)
@@ -870,8 +884,40 @@ class MainWindow(QMainWindow):
 
     def _refresh_all(self) -> None:
         self._refresh_stats()
+        self._refresh_library_filters()
         self._refresh_library()
         self._refresh_collections()
+
+    def _refresh_library_filters(self) -> None:
+        try:
+            settings = Settings.load()
+            conn = connect(settings)
+            collections = list_collections(conn)
+            sources = list_inline_sources(conn)
+            conn.close()
+
+            lib_coll = self._library_collection_combo.currentData()
+            lib_src = self._library_source_combo.currentData()
+
+            self._library_collection_combo.blockSignals(True)
+            self._library_collection_combo.clear()
+            self._library_collection_combo.addItem("(all collections)", "")
+            for name in collections:
+                self._library_collection_combo.addItem(name, name)
+            idx = self._library_collection_combo.findData(lib_coll or "")
+            self._library_collection_combo.setCurrentIndex(idx if idx >= 0 else 0)
+            self._library_collection_combo.blockSignals(False)
+
+            self._library_source_combo.blockSignals(True)
+            self._library_source_combo.clear()
+            self._library_source_combo.addItem("(all sources)", "")
+            for name in sources:
+                self._library_source_combo.addItem(name, name)
+            idx = self._library_source_combo.findData(lib_src or "")
+            self._library_source_combo.setCurrentIndex(idx if idx >= 0 else 0)
+            self._library_source_combo.blockSignals(False)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _refresh_collections(self) -> None:
         try:
@@ -895,14 +941,24 @@ class MainWindow(QMainWindow):
         try:
             settings = Settings.load()
             conn = connect(settings)
-            rows = list_documents(conn)
+            collection = self._library_collection_combo.currentData()
+            source = self._library_source_combo.currentData()
+            collection_name = str(collection) if collection else None
+            source_name = str(source) if source else None
+            if collection_name == "":
+                collection_name = None
+            if source_name == "":
+                source_name = None
+            rows = list_documents(conn, collection=collection_name, source=source_name)
             self._doc_list.clear()
             for d in rows:
                 tags = get_tags_for_doc(conn, d.id)
                 colls = get_collections_for_doc(conn, d.id)
+                src = inline_source_from_path(d.path)
                 tag_s = f" [{', '.join(tags)}]" if tags else ""
                 coll_s = f" <{', '.join(colls)}>" if colls else ""
-                label = f"{(d.title or d.path)[:36]}{tag_s}{coll_s}"
+                src_s = f" ({src})" if src else ""
+                label = f"{(d.title or d.path)[:36]}{src_s}{tag_s}{coll_s}"
                 item = QListWidgetItem(label)
                 item.setData(Qt.ItemDataRole.UserRole, d.path)
                 item.setToolTip(d.path)

@@ -73,6 +73,8 @@ List everything in the catalog:
 cluny library list
 ```
 
+**Capture notes from your phone** via Telegram — see [docs/telegram-capture.md](docs/telegram-capture.md).
+
 **Batch a whole folder** (every `.pdf`, `.md`, `.txt`, `.json`, `.journal` under the path; skips dot-folders like `.git` unless you pass `--include-hidden`):
 
 ```bash

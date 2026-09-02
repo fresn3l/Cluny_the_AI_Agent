@@ -150,7 +150,7 @@ class BrainClient:
         context_json: KosistenzContext | dict | None = None,
         collection: str | None = None,
         k: int = 5,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         payload: dict[str, Any] = {"question": question, "k": k}
         if context:
             payload["context"] = context
@@ -168,7 +168,8 @@ class BrainClient:
                 headers=self._headers(),
             )
             r.raise_for_status()
-            return list(r.json().get("proposals") or [])
+            data = r.json()
+        return list(data.get("proposals") or []), list(data.get("sources") or [])
 
     def brain_config_get(self) -> dict[str, Any]:
         with httpx.Client(timeout=30.0) as client:

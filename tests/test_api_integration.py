@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from cluny.api import create_app
 from cluny.kosistenz_context import KosistenzContext
-from cluny.proposals import WorkProposal
+from cluny.proposals import ProposalResult, WorkProposal
 from cluny.query import RetrievedChunk, RagAnswer, RagSource
 from cluny.supervisor import SourceCitation, SupervisorResult
 
@@ -85,7 +85,10 @@ def test_chat_unknown_session(client: TestClient):
 def test_propose_structured_context(client: TestClient):
     with patch(
         "cluny.api.run_proposals",
-        return_value=[WorkProposal(title="Draft agenda", estimate_minutes=20, due=None, keywords=[])],
+        return_value=ProposalResult(
+            proposals=[WorkProposal(title="Draft agenda", estimate_minutes=20, due=None, keywords=[])],
+            sources=(),
+        ),
     ):
         r = client.post(
             "/propose",

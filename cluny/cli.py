@@ -29,6 +29,7 @@ from cluny.library_db import (
     get_tags_for_doc,
     list_collections,
     list_documents,
+    list_inline_sources,
     list_tags,
     resolve_document,
 )
@@ -58,6 +59,7 @@ collection_app = typer.Typer(help="Organize documents into collections.")
 calendar_app = typer.Typer(help="Read-only calendar from imported ICS files.")
 backup_app = typer.Typer(help="Backup and restore data snapshots.")
 brain_app = typer.Typer(help="Export and import Cluny brain instructions.")
+telegram_app = typer.Typer(help="Telegram capture bot (text notes from your phone).")
 app.add_typer(library_app, name="library")
 app.add_typer(tag_app, name="tag")
 app.add_typer(tasks_app, name="tasks")
@@ -65,6 +67,7 @@ app.add_typer(collection_app, name="collection")
 app.add_typer(calendar_app, name="calendar")
 app.add_typer(backup_app, name="backup")
 app.add_typer(brain_app, name="brain")
+app.add_typer(telegram_app, name="telegram")
 
 
 def _echo_index_result(n: int, doc_id: str, unchanged: bool) -> None:
@@ -811,11 +814,14 @@ def library_list(
     collection: str | None = typer.Option(
         None, "--collection", "-c", help="Filter by collection name."
     ),
+    source: str | None = typer.Option(
+        None, "--source", "-s", help="Filter inline ingest source (e.g. kosistenz-journal)."
+    ),
 ) -> None:
     """List documents registered in the SQLite catalog."""
     settings = Settings.from_env()
     conn = connect(settings)
-    rows = list_documents(conn, tag=tag, collection=collection)
+    rows = list_documents(conn, tag=tag, collection=collection, source=source)
     for d in rows:
         tags = get_tags_for_doc(conn, d.id)
         colls = get_collections_for_doc(conn, d.id)
@@ -1215,6 +1221,22 @@ def serve() -> None:
     settings = Settings.load()
     typer.echo(f"Serving Cluny API at http://{settings.api_bind_host}:{settings.api_port}")
     api_serve(settings)
+
+
+@telegram_app.command("run")
+def telegram_run() -> None:
+    """Run Telegram long-poll bot; text messages are indexed into Cluny."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    settings = Settings.load()
+    try:
+        from cluny.telegram_bot import run_bot
+
+        run_bot(settings)
+    except RuntimeError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=1) from e
+    except KeyboardInterrupt:
+        typer.echo("\nStopped.")
 
 
 def main() -> None:

@@ -13,13 +13,14 @@ from cluny.brain_config import (
     effective_config,
     reset_brain_config,
 )
+from cluny.capture import capture_note
 from cluny.chat_service import SessionNotFoundError, api_chat, api_chat_stream_events
 from cluny.config import Settings
 from cluny.documents import add_inline_text
 from cluny.kosistenz_context import KosistenzContext
-from cluny.library_db import connect, document_count, list_documents
+from cluny.library_db import connect, document_count, get_collections_for_doc, inline_source_from_path, list_documents
 from cluny.ollama_client import OllamaClient, OllamaError
-from cluny.proposals import run_proposals
+from cluny.proposals import run_proposals, source_dicts_from_rag_sources
 from cluny.query import retrieve
 from cluny.store import get_collection
 from cluny.task_sync import (
@@ -51,6 +52,13 @@ class IngestTextRequest(BaseModel):
     source: str = "inline"
     catalog: bool = False
     title: str | None = None
+    collection: str | None = None
+
+
+class CaptureRequest(BaseModel):
+    text: str
+    title: str | None = None
+    source: str | None = None
     collection: str | None = None
 
 
@@ -278,23 +286,49 @@ def create_app() -> FastAPI:
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
 
+    @app.post("/capture", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def capture(body: CaptureRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        """Index a short note from phone/Telegram (catalog + default collection)."""
+        if not body.text.strip():
+            raise HTTPException(status_code=400, detail="text cannot be empty")
+        try:
+            result = capture_note(
+                body.text,
+                settings=settings,
+                title=body.title,
+                source=body.source,
+                collection=body.collection,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except OllamaError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        return result.to_dict()
+
     @app.get("/library", dependencies=[Depends(_check_auth)], tags=["Brain"])
-    def library(settings: Settings = Depends(_settings)) -> dict[str, Any]:
+    def library(
+        collection: str | None = None,
+        source: str | None = None,
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
         conn = connect(settings)
-        docs = list_documents(conn)
-        conn.close()
-        return {
-            "documents": [
+        docs = list_documents(conn, collection=collection, source=source)
+        payload = []
+        for d in docs:
+            colls = get_collections_for_doc(conn, d.id)
+            payload.append(
                 {
                     "id": d.id,
                     "path": d.path,
                     "kind": d.kind,
                     "title": d.title,
                     "chunk_count": d.chunk_count,
+                    "source": inline_source_from_path(d.path),
+                    "collections": colls,
                 }
-                for d in docs
-            ]
-        }
+            )
+        conn.close()
+        return {"documents": payload, "collection": collection, "source": source}
 
     @app.post("/agent", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def agent(body: AgentRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
@@ -381,7 +415,7 @@ def create_app() -> FastAPI:
     @app.post("/propose", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def propose(body: ProposeRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
         try:
-            proposals = run_proposals(
+            result = run_proposals(
                 body.question,
                 context=body.context,
                 context_json=body.context_json,
@@ -391,7 +425,10 @@ def create_app() -> FastAPI:
             )
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
-        return {"proposals": [p.to_dict() for p in proposals]}
+        return {
+            "proposals": [p.to_dict() for p in result.proposals],
+            "sources": source_dicts_from_rag_sources(result.sources),
+        }
 
     @app.get("/brain/config", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def brain_config_get(settings: Settings = Depends(_settings)) -> dict[str, Any]:

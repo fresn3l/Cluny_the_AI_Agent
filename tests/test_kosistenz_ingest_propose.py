@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from cluny.api import create_app
 from cluny.documents import IndexResult
-from cluny.proposals import WorkProposal
+from cluny.proposals import ProposalResult, WorkProposal
 
 
 @pytest.fixture
@@ -40,9 +40,21 @@ def test_ingest_text_with_collection(client: TestClient):
 
 
 def test_propose_with_collection_and_analytics(client: TestClient):
+    from cluny.query import RagSource
+
     with patch(
         "cluny.api.run_proposals",
-        return_value=[WorkProposal(title="Reflect on slips", estimate_minutes=20, due=None, keywords=[])],
+        return_value=ProposalResult(
+            proposals=[WorkProposal(title="Reflect on slips", estimate_minutes=20, due=None, keywords=[])],
+            sources=(
+                RagSource(
+                    label="2026-08-28 journal",
+                    snippet="Slipped tasks on Friday",
+                    doc_path="inline:kosistenz-journal:abc",
+                    chunk_index=0,
+                ),
+            ),
+        ),
     ) as mock_run:
         r = client.post(
             "/propose",
@@ -58,6 +70,8 @@ def test_propose_with_collection_and_analytics(client: TestClient):
             },
         )
     assert r.status_code == 200
-    assert r.json()["proposals"][0]["title"] == "Reflect on slips"
+    data = r.json()
+    assert data["proposals"][0]["title"] == "Reflect on slips"
+    assert data["sources"][0]["label"] == "2026-08-28 journal"
     mock_run.assert_called_once()
     assert mock_run.call_args.kwargs["collection"] == "journal"

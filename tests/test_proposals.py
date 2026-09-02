@@ -6,8 +6,10 @@ from unittest.mock import patch
 
 from cluny.proposals import (
     RETRIEVED_SNIPPETS_HEADER,
+    ProposalResult,
     WorkProposal,
     _parse_proposals,
+    chunks_to_sources,
     format_retrieved_snippets,
     run_proposals,
 )
@@ -54,15 +56,17 @@ def test_run_proposals_mocked(settings):
         patch("cluny.proposals.OllamaClient") as mock_cls,
     ):
         mock_cls.return_value.chat.return_value = raw
-        items = run_proposals(
+        result = run_proposals(
             "What should I change next week?",
             settings=settings,
             context_json={"analytics": {"tasks_slipped": 3}},
             collection="journal",
             k=3,
         )
-    assert len(items) == 1
-    assert items[0].title == "Review PR"
+    assert len(result.proposals) == 1
+    assert result.proposals[0].title == "Review PR"
+    assert len(result.sources) == 1
+    assert result.sources[0].label == "analytics-2026-W35"
     mock_retrieve.assert_called_once()
     call_kwargs = mock_retrieve.call_args.kwargs
     assert call_kwargs["collection_name"] == "journal"
@@ -72,6 +76,21 @@ def test_run_proposals_mocked(settings):
     assert "Slipped three tasks" in user_prompt
 
 
+def test_chunks_to_sources_preview():
+    chunks = [
+        RetrievedChunk(
+            text="Long journal entry about the week",
+            label="2026-08-28 journal",
+            doc_path="inline:kosistenz-journal:abc",
+            chunk_index=1,
+            score=0.9,
+        )
+    ]
+    sources = chunks_to_sources(chunks)
+    assert len(sources) == 1
+    assert sources[0].label == "2026-08-28 journal"
+    assert sources[0].chunk_index == 1
+
 def test_run_proposals_without_retrieval(settings):
     raw = '{"proposals": [{"title": "Walk", "estimate_minutes": 15, "due": null, "keywords": []}]}'
     with (
@@ -79,7 +98,7 @@ def test_run_proposals_without_retrieval(settings):
         patch("cluny.proposals.OllamaClient") as mock_cls,
     ):
         mock_cls.return_value.chat.return_value = raw
-        items = run_proposals("Anything?", settings=settings)
-    assert items[0].title == "Walk"
+        result = run_proposals("Anything?", settings=settings)
+    assert result.proposals[0].title == "Walk"
     user_prompt = mock_cls.return_value.chat.call_args.kwargs["user"]
     assert RETRIEVED_SNIPPETS_HEADER not in user_prompt
