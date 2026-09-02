@@ -17,8 +17,20 @@ from cluny.capture import capture_note
 from cluny.chat_service import SessionNotFoundError, api_chat, api_chat_stream_events
 from cluny.config import Settings
 from cluny.documents import add_inline_text
+from cluny.gui_api import (
+    apply_user_config_update,
+    create_session_payload,
+    delete_library_doc,
+    ingest_uploaded_file,
+    library_collections,
+    library_documents_payload,
+    session_messages_payload,
+    sessions_list,
+    stats_payload,
+    user_config_payload,
+)
 from cluny.kosistenz_context import KosistenzContext
-from cluny.library_db import connect, document_count, get_collections_for_doc, inline_source_from_path, list_documents
+from cluny.library_db import connect, document_count
 from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.proposals import run_proposals, source_dicts_from_rag_sources
 from cluny.query import retrieve
@@ -32,7 +44,7 @@ from cluny.task_sync import (
 from cluny.tasks_db import connect as tasks_connect, list_tasks
 
 try:
-    from fastapi import Depends, FastAPI, Header, HTTPException, Request
+    from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
     from fastapi.responses import StreamingResponse
     from pydantic import BaseModel, Field
 except ImportError as e:  # pragma: no cover
@@ -107,6 +119,20 @@ class BrainConfigResetRequest(BaseModel):
     reset_all: bool = False
 
 
+class UserConfigPutRequest(BaseModel):
+    chat_model: str | None = None
+    embed_model: str | None = None
+    retrieval_k: int | None = Field(default=None, ge=1, le=50)
+    hybrid_vector_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    agent_mode: str | None = None
+    ask_collection: str | None = None
+    standalone_mode: bool | None = None
+
+
+class SessionCreateRequest(BaseModel):
+    title: str | None = None
+
+
 def _settings() -> Settings:
     return Settings.load()
 
@@ -165,7 +191,7 @@ def _sse_from_payloads(payloads) -> StreamingResponse:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Cluny API",
-        version="0.5.0",
+        version="0.6.0",
         description=(
             "Brain service for Kosistenz — RAG, Ask/chat/agent, journal index copy. "
             "Kosistenz owns week clock, todos, calendar, and journal files. "
@@ -196,6 +222,7 @@ def create_app() -> FastAPI:
             pass
         ollama_ok = _ollama_ok(settings)
         brain_ready, message = _brain_status(settings)
+        extra = stats_payload(settings)
         return {
             "status": "ok",
             "integration": "brain-only",
@@ -206,7 +233,12 @@ def create_app() -> FastAPI:
             "task_count": task_count,
             "chunk_count": chunk_count,
             "task_count_note": "local CLI/widget tasks.sqlite — not Kosistenz todos",
+            **extra,
         }
+
+    @app.get("/stats", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def stats(settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        return stats_payload(settings)
 
     @app.post("/search", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def search(body: SearchRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:
@@ -305,30 +337,79 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=502, detail=str(e)) from e
         return result.to_dict()
 
+    @app.get("/library/collections", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def library_collections_route(settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        return library_collections(settings)
+
     @app.get("/library", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def library(
         collection: str | None = None,
         source: str | None = None,
         settings: Settings = Depends(_settings),
     ) -> dict[str, Any]:
-        conn = connect(settings)
-        docs = list_documents(conn, collection=collection, source=source)
-        payload = []
-        for d in docs:
-            colls = get_collections_for_doc(conn, d.id)
-            payload.append(
-                {
-                    "id": d.id,
-                    "path": d.path,
-                    "kind": d.kind,
-                    "title": d.title,
-                    "chunk_count": d.chunk_count,
-                    "source": inline_source_from_path(d.path),
-                    "collections": colls,
-                }
+        return library_documents_payload(settings, collection=collection, source=source)
+
+    @app.delete("/library/{doc_id}", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def library_delete(doc_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        try:
+            return delete_library_doc(settings, doc_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.post("/ingest/file", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    async def ingest_file(
+        file: UploadFile = File(...),
+        title: str | None = Form(None),
+        copy_into_library: bool = Form(False),
+        collection: str | None = Form(None),
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(status_code=400, detail="empty file")
+        try:
+            return ingest_uploaded_file(
+                settings,
+                filename=file.filename or "upload.txt",
+                content=raw,
+                title=title,
+                copy_into_library=copy_into_library,
+                collection=collection,
             )
-        conn.close()
-        return {"documents": payload, "collection": collection, "source": source}
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except OllamaError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+
+    @app.get("/sessions", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def sessions_list_route(
+        limit: int = 50, settings: Settings = Depends(_settings)
+    ) -> dict[str, Any]:
+        return sessions_list(settings, limit=min(max(limit, 1), 100))
+
+    @app.post("/sessions", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def sessions_create(
+        body: SessionCreateRequest, settings: Settings = Depends(_settings)
+    ) -> dict[str, Any]:
+        return create_session_payload(settings, title=body.title)
+
+    @app.get("/sessions/{session_id}/messages", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def sessions_messages(session_id: str, settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        try:
+            return session_messages_payload(settings, session_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+
+    @app.get("/user/config", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def user_config_get(settings: Settings = Depends(_settings)) -> dict[str, Any]:
+        return user_config_payload(settings)
+
+    @app.put("/user/config", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def user_config_put(
+        body: UserConfigPutRequest, settings: Settings = Depends(_settings)
+    ) -> dict[str, Any]:
+        data = body.model_dump(exclude_unset=True)
+        return apply_user_config_update(settings, data)
 
     @app.post("/agent", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def agent(body: AgentRequest, settings: Settings = Depends(_settings)) -> dict[str, Any]:

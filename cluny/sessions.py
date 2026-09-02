@@ -129,6 +129,34 @@ def get_session(conn: sqlite3.Connection, session_id: str) -> str | None:
     return str(row[0]) if row else None
 
 
+@dataclass(frozen=True)
+class SessionRow:
+    id: str
+    title: str | None
+    created_at: str
+    updated_at: str
+
+
+def list_sessions(conn: sqlite3.Connection, *, limit: int = 50) -> list[SessionRow]:
+    cur = conn.execute(
+        """
+        SELECT id, title, created_at, updated_at FROM sessions
+        ORDER BY updated_at DESC
+        LIMIT ?
+        """,
+        (max(1, limit),),
+    )
+    return [
+        SessionRow(
+            id=str(r[0]),
+            title=str(r[1]) if r[1] is not None else None,
+            created_at=str(r[2]),
+            updated_at=str(r[3]),
+        )
+        for r in cur.fetchall()
+    ]
+
+
 def session_history_prefix(messages: list[MessageRow], *, max_turns: int = 6) -> str:
     """Format recent turns for inclusion in the chat prompt."""
     recent = messages[-max_turns:]
