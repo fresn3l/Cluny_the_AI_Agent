@@ -11,6 +11,12 @@ from cluny.config import Settings
 from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.tools.calendar import build_calendar_tools
 from cluny.tools.knowledge import build_knowledge_tools
+from cluny.tools.proposals import (
+    build_proposal_tools,
+    build_scratch_list_tool,
+    clear_agent_proposals,
+    last_agent_proposals,
+)
 from cluny.tools.registry import Tool, ToolRegistry
 from cluny.tools.tasks import build_task_tools
 
@@ -24,27 +30,33 @@ PLANNER_AGENT_SYSTEM = DEFAULT_PROMPTS["planner_agent_system"]
 MAX_TURNS = 8
 PLANNER_MAX_TURNS = 12
 
-_TASK_TOOL_NAMES = frozenset(
-    {"create_task", "list_tasks", "update_task", "complete_task"}
-)
+# Live CRUD against Cluny tasks.sqlite — standalone scratch mode only.
+_LIVE_TASK_CRUD = frozenset({"create_task", "update_task", "complete_task", "list_tasks"})
 _KNOWLEDGE_TOOL_NAMES = frozenset({"search_brain", "add_note"})
-_CALENDAR_TOOL_NAMES = frozenset({"list_events", "events_on_date"})
+_PROPOSAL_TOOL_NAMES = frozenset({"create_proposal"})
+_SNAPSHOT_CAL_NAMES = frozenset({"week_from_snapshot", "events_on_date"})
+_SCRATCH_LIST = frozenset({"list_scratch_tasks"})
 
 
 @dataclass
 class AgentResult:
     answer: str
     tool_calls: list[str] = field(default_factory=list)
+    proposals: list[dict] = field(default_factory=list)
 
 
 def _build_registry(settings: Settings, mode: AgentMode) -> ToolRegistry:
     tools: list[Tool] = []
     if mode in ("knowledge", "all", "planner"):
         tools.extend(build_knowledge_tools(settings))
-    if mode in ("tasks", "all", "planner"):
-        tools.extend(build_task_tools(settings))
     if mode in ("all", "planner"):
+        # Propose work for Kosistenz; do not live-CRUD Cluny tasks.sqlite.
+        tools.extend(build_proposal_tools(settings))
         tools.extend(build_calendar_tools(settings))
+        tools.extend(build_scratch_list_tool(settings))
+    if mode == "tasks":
+        # Standalone scratch only — not Kosistenz All Work / Today / iPhone.
+        tools.extend(build_task_tools(settings))
     return ToolRegistry(tools)
 
 
@@ -61,8 +73,14 @@ def _tool_allowed(mode: AgentMode, name: str) -> bool:
     if mode == "knowledge":
         return name in _KNOWLEDGE_TOOL_NAMES
     if mode == "tasks":
-        return name in _TASK_TOOL_NAMES
-    return True
+        return name in _LIVE_TASK_CRUD
+    if mode in ("planner", "all"):
+        if name in _LIVE_TASK_CRUD:
+            return False
+        return name in (
+            _KNOWLEDGE_TOOL_NAMES | _PROPOSAL_TOOL_NAMES | _SNAPSHOT_CAL_NAMES | _SCRATCH_LIST
+        )
+    return False
 
 
 def run_agent(
@@ -76,6 +94,7 @@ def run_agent(
     ollama = OllamaClient(settings)
     registry = _build_registry(settings, mode)
     turns = max_turns if max_turns is not None else _max_turns(mode)
+    clear_agent_proposals()
 
     messages: list[dict] = [
         {"role": "system", "content": _system_for_mode(mode, settings)},
@@ -94,7 +113,11 @@ def run_agent(
         tool_calls = msg.get("tool_calls") or []
 
         if not tool_calls:
-            return AgentResult(answer=str(content).strip(), tool_calls=tool_trace)
+            return AgentResult(
+                answer=str(content).strip(),
+                tool_calls=tool_trace,
+                proposals=last_agent_proposals(),
+            )
 
         messages.append(msg)
 
@@ -111,7 +134,15 @@ def run_agent(
                 args = raw_args if isinstance(raw_args, dict) else {}
 
             if not _tool_allowed(mode, name):
-                result = json.dumps({"error": f"Tool {name} not available in {mode} mode"})
+                result = json.dumps(
+                    {
+                        "error": (
+                            f"Tool {name} not available in {mode} mode. "
+                            "For Kosistenz brain use search_brain then create_proposal. "
+                            "Do not create live tasks or pick clock times."
+                        )
+                    }
+                )
             else:
                 result = registry.execute(name, args)
 
@@ -121,4 +152,5 @@ def run_agent(
     return AgentResult(
         answer="I reached the maximum number of tool steps. Please try a simpler question.",
         tool_calls=tool_trace,
+        proposals=last_agent_proposals(),
     )

@@ -403,7 +403,9 @@ class _SettingsDialog(QDialog):
         self._embed.setPlainText(config.embed_model)
         self._embed.setMaximumHeight(36)
         form.addRow("Embed model", self._embed)
-        self._standalone = QCheckBox("Standalone mode (menu bar shows Task tab instead of Propose)")
+        self._standalone = QCheckBox(
+            "Standalone mode (menu bar shows Scratch tab instead of Propose — not Kosistenz Today)"
+        )
         self._standalone.setChecked(config.standalone_mode)
         form.addRow(self._standalone)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)

@@ -27,3 +27,5 @@ def test_format_glance_text(settings):
     text = format_glance_text(summary)
     assert "Documents:" in text
     assert "Vector chunks:" in text
+    assert "scratch" in text.lower() or "Kosistenz" in text
+    assert "Due this week:" not in text

@@ -75,7 +75,7 @@ class WidgetPanel(QFrame):
         self._tabs.addTab(self._build_ask_tab(), "Ask")
         self._tabs.addTab(self._build_capture_tab(), "Capture")
         if self._user_config.standalone_mode:
-            self._tabs.addTab(self._build_task_tab(), "Task")
+            self._tabs.addTab(self._build_task_tab(), "Scratch")
         else:
             self._tabs.addTab(self._build_propose_tab(), "Propose")
         self._tabs.addTab(self._build_glance_tab(), "Glance")
@@ -152,7 +152,7 @@ class WidgetPanel(QFrame):
         lay = QVBoxLayout(w)
         self._propose_input = QTextEdit()
         self._propose_input.setPlaceholderText(
-            "What should I work on? Cluny suggests items for Kosistenz to schedule."
+            "What should I work on? Cluny proposes items; Kosistenz commits them."
         )
         self._propose_input.setMaximumHeight(80)
         lay.addWidget(self._propose_input)
@@ -172,14 +172,23 @@ class WidgetPanel(QFrame):
         w = QWidget()
         lay = QVBoxLayout(w)
         self._task_title = QLineEdit()
-        self._task_title.setPlaceholderText("Task title (standalone mode)")
+        self._task_title.setPlaceholderText(
+            "Cluny scratch only — will not appear in Kosistenz or on the phone"
+        )
         lay.addWidget(self._task_title)
 
         self._task_due = QLineEdit()
-        self._task_due.setPlaceholderText("Due (optional): tomorrow, +3d, ISO date")
+        self._task_due.setPlaceholderText("Due (optional, scratch): tomorrow, +3d, ISO date")
         lay.addWidget(self._task_due)
 
-        self._task_btn = QPushButton("Add task")
+        self._task_btn = QPushButton("Add scratch task")
+        hint = QLabel(
+            "Scratch list in Cluny only. Not Today / All Work / iPhone. "
+            "Prefer Propose when Kosistenz is your planner."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("statusLabel")
+        lay.addWidget(hint)
         self._task_btn.setObjectName("primaryBtn")
         self._task_btn.clicked.connect(self._on_task)
         lay.addWidget(self._task_btn, 0, Qt.AlignmentFlag.AlignRight)

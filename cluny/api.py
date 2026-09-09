@@ -38,6 +38,7 @@ from cluny.kosistenz_context import KosistenzContext
 from cluny.library_db import connect, document_count
 from cluny.ollama_client import OllamaClient, OllamaError
 from cluny.proposals import run_proposals, source_dicts_from_rag_sources
+from cluny.proposal_accepts import record_acceptance
 from cluny.query import retrieve
 from cluny.store import get_collection
 from cluny.task_sync import (
@@ -87,7 +88,7 @@ class AgentRequest(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     context: str | None = None
-    context_json: KosistenzContext | None = None
+    context_json: dict[str, Any] | KosistenzContext | None = None
     session_id: str | None = None
     collection: str | None = None
     k: int = Field(default=5, ge=1, le=50)
@@ -96,9 +97,14 @@ class ChatRequest(BaseModel):
 class ProposeRequest(BaseModel):
     question: str
     context: str | None = None
-    context_json: KosistenzContext | None = None
+    context_json: dict[str, Any] | KosistenzContext | None = None
     collection: str | None = None
     k: int = Field(default=5, ge=1, le=25)
+
+
+class ProposeAcceptedRequest(BaseModel):
+    proposal_id: str
+    kosistenz_id: str
 
 
 class TaskSyncRequest(BaseModel):
@@ -589,6 +595,20 @@ def create_app() -> FastAPI:
             "proposals": [p.to_dict() for p in result.proposals],
             "sources": source_dicts_from_rag_sources(result.sources),
         }
+
+    @app.post("/propose/accepted", dependencies=[Depends(_check_auth)], tags=["Brain"])
+    def propose_accepted(
+        body: ProposeAcceptedRequest, settings: Settings = Depends(_settings)
+    ) -> dict[str, Any]:
+        """Record that Kosistenz accepted a proposal (pointer kosistenz:{uuid})."""
+        try:
+            return record_acceptance(
+                settings,
+                proposal_id=body.proposal_id,
+                kosistenz_id=body.kosistenz_id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     @app.get("/brain/config", dependencies=[Depends(_check_auth)], tags=["Brain"])
     def brain_config_get(settings: Settings = Depends(_settings)) -> dict[str, Any]:

@@ -10,7 +10,7 @@ from typing import Literal
 from cluny.agent import run_agent
 from cluny.brain_config import DEFAULT_PROMPTS, get_prompt, get_supervisor_mode
 from cluny.config import Settings
-from cluny.kosistenz_context import KosistenzContext, merge_context
+from cluny.kosistenz_context import KosistenzContext, format_chat_question
 from cluny.ollama_client import OllamaClient
 from cluny.query import RagSource, rag_answer, rag_answer_stream
 
@@ -20,14 +20,14 @@ _TASK_RE = re.compile(
     r"\b(task|todo|to-do|due|deadline|remind|complete|finish)\b", re.I
 )
 _CALENDAR_RE = re.compile(
-    r"\b(calendar|meeting|schedule|appointment|event|ics)\b", re.I
+    r"\b(calendar|meeting|schedule|appointment|event|ics|free time)\b", re.I
 )
 _KNOWLEDGE_RE = re.compile(
     r"\b(notes?|paper|article|indexed|brain|document|journal|remember|who said|what did)\b",
     re.I,
 )
 _PLANNER_RE = re.compile(
-    r"\b(and then|after that|also (add|create)|summarize .+ and (add|create))\b",
+    r"\b(and then|after that|also (add|create|propose)|summarize .+ and (add|create|propose))\b",
     re.I,
 )
 
@@ -83,7 +83,10 @@ def classify_intent_regex(question: str) -> Route:
 def classify_intent_llm(question: str, settings: Settings) -> Route:
     ollama = OllamaClient(settings)
     try:
-        raw = ollama.chat(system=get_prompt("router_system", settings=settings), user=question.strip()).strip().lower()
+        raw = ollama.chat(
+            system=get_prompt("router_system", settings=settings),
+            user=question.strip(),
+        ).strip().lower()
     except Exception:  # noqa: BLE001
         return classify_intent_regex(question)
     for route in ("planner", "calendar", "tasks_agent", "knowledge_agent", "ask"):
@@ -97,23 +100,6 @@ def classify_intent(question: str, settings: Settings | None = None) -> Route:
     if get_supervisor_mode(settings=settings) == "regex":
         return classify_intent_regex(question)
     return classify_intent_llm(question, settings)
-
-
-def format_chat_question(
-    question: str,
-    context: str | None = None,
-    *,
-    context_json: KosistenzContext | dict | None = None,
-    history_prefix: str | None = None,
-) -> str:
-    """Merge Kosistenz-supplied context and optional session history."""
-    q = question.strip()
-    merged_ctx = merge_context(context=context, context_json=context_json)
-    if merged_ctx:
-        q = f"Context from Kosistenz:\n{merged_ctx}\n\nQuestion:\n{q}"
-    if history_prefix:
-        q = history_prefix + q
-    return q
 
 
 def _result_from_rag(route: Route, rag) -> SupervisorResult:
@@ -131,11 +117,16 @@ def _calendar_answer(
     *,
     collection_name: str | None = None,
 ) -> SupervisorResult:
-    if settings.kosistenz_journal_dir:
-        rag = rag_answer(question, settings=settings, collection_name=collection_name)
+    """Answer calendar questions from the prompt context / snapshot — not as planner SoT."""
+    from cluny.kosistenz_context import load_life_snapshot
+
+    snap = load_life_snapshot()
+    rag = rag_answer(question, settings=settings, collection_name=collection_name)
+    if snap or "Context from Kosistenz:" in question:
         prefix = (
-            "Calendar and scheduling live in Kosistenz. Include events and deadlines "
-            "in your message — answering from that context and indexed notes.\n\n"
+            "Calendar and the week clock live in Kosistenz. "
+            "Answer from the Kosistenz life snapshot in context (and notes). "
+            "Do not invent a week from Cluny calendar.sqlite. Never pick HH:MM.\n\n"
         )
         return SupervisorResult(
             route="calendar",
@@ -143,34 +134,17 @@ def _calendar_answer(
             tool_calls=[],
             sources=tuple(SourceCitation.from_rag(s) for s in rag.sources),
         )
-    try:
-        from cluny.calendar_db import connect as cal_connect, list_upcoming
-
-        conn = cal_connect(settings)
-        events = list_upcoming(conn, limit=10)
-        conn.close()
-        if not events:
-            return SupervisorResult(
-                route="calendar",
-                answer=(
-                    "No events in Cluny's local calendar.sqlite. "
-                    "Import with `cluny calendar import file.ics`, or — if you use Kosistenz — "
-                    "set CLUNY_KOSISTENZ_JOURNAL_DIR and include your schedule in the question."
-                ),
-                tool_calls=[],
-            )
-        lines = [f"- {e.summary} ({e.start_at})" for e in events]
-        return SupervisorResult(
-            route="calendar",
-            answer="Upcoming events:\n" + "\n".join(lines),
-            tool_calls=[],
-        )
-    except Exception:  # noqa: BLE001
-        return SupervisorResult(
-            route="calendar",
-            answer="Calendar is not available. Import events with `cluny calendar import`.",
-            tool_calls=[],
-        )
+    return SupervisorResult(
+        route="calendar",
+        answer=(
+            "No Kosistenz life snapshot is available, so there is no live week to read. "
+            "Answer from indexed notes only — do not invent Today from Cluny "
+            "calendar.sqlite or tasks.sqlite. "
+            + (rag.answer if rag.answer else "")
+        ),
+        tool_calls=[],
+        sources=tuple(SourceCitation.from_rag(s) for s in rag.sources),
+    )
 
 
 def run_chat(
@@ -199,7 +173,8 @@ def run_chat(
         return SupervisorResult(route=route, answer=result.answer, tool_calls=result.tool_calls)
 
     if route == "tasks_agent":
-        result = run_agent(merged, settings=settings, mode="tasks")
+        # Kosistenz brain path: propose + snapshot tools, not live tasks.sqlite CRUD.
+        result = run_agent(merged, settings=settings, mode="all")
         return SupervisorResult(route=route, answer=result.answer, tool_calls=result.tool_calls)
 
     if route == "knowledge_agent":
@@ -235,7 +210,7 @@ def run_chat_stream(
     )
     route = classify_intent(merged, settings)
 
-    if route in ("ask", "calendar") and (route == "ask" or settings.kosistenz_journal_dir):
+    if route in ("ask", "calendar"):
         stream, sources, empty = rag_answer_stream(
             merged,
             k=k,

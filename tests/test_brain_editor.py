@@ -26,6 +26,7 @@ def qapp():
 
 def test_brain_editor_dialog_loads_defaults(qapp, settings, monkeypatch):
     monkeypatch.setenv("CLUNY_DATA_DIR", str(settings.data_dir))
+    monkeypatch.delenv("CLUNY_BRAIN_URL", raising=False)
     invalidate_brain_config_cache()
     from cluny.gui.brain_editor import BrainEditorDialog
 
@@ -39,6 +40,7 @@ def test_brain_editor_dialog_loads_defaults(qapp, settings, monkeypatch):
 
 def test_brain_editor_collect_prompts_roundtrip(qapp, settings, monkeypatch):
     monkeypatch.setenv("CLUNY_DATA_DIR", str(settings.data_dir))
+    monkeypatch.delenv("CLUNY_BRAIN_URL", raising=False)
     invalidate_brain_config_cache()
     from cluny.brain_config import apply_config_update
     from cluny.gui.brain_editor import BrainEditorDialog

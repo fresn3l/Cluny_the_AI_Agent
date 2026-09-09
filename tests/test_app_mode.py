@@ -18,7 +18,7 @@ def test_is_packaged_env_flag(monkeypatch):
     assert is_packaged_app() is True
 
 
-def test_configure_sets_brain_url_when_packaged(monkeypatch, tmp_path):
+def test_configure_sets_brain_url_when_packaged(monkeypatch, tmp_path, request):
     monkeypatch.setenv("CLUNY_PACKAGED", "1")
     monkeypatch.delenv("CLUNY_BRAIN_URL", raising=False)
     monkeypatch.delenv("CLUNY_DATA_DIR", raising=False)
@@ -26,14 +26,18 @@ def test_configure_sets_brain_url_when_packaged(monkeypatch, tmp_path):
     configure_app_environment()
     assert os.environ.get("CLUNY_BRAIN_URL") == DEFAULT_BRAIN_URL
     assert "support" in os.environ.get("CLUNY_DATA_DIR", "")
+    # setdefault is invisible to monkeypatch when the key was absent
+    request.addfinalizer(lambda: os.environ.pop("CLUNY_BRAIN_URL", None))
+    request.addfinalizer(lambda: os.environ.pop("CLUNY_DATA_DIR", None))
 
 
-def test_configure_http_brain_flag(monkeypatch):
+def test_configure_http_brain_flag(monkeypatch, request):
     monkeypatch.delenv("CLUNY_PACKAGED", raising=False)
     monkeypatch.delenv("CLUNY_BRAIN_URL", raising=False)
     monkeypatch.setenv("CLUNY_USE_HTTP_BRAIN", "1")
     configure_app_environment()
     assert os.environ.get("CLUNY_BRAIN_URL") == DEFAULT_BRAIN_URL
+    request.addfinalizer(lambda: os.environ.pop("CLUNY_BRAIN_URL", None))
 
 
 def test_uses_http_brain_packaged(monkeypatch):

@@ -63,12 +63,12 @@ def format_glance_text(summary: GlanceSummary) -> str:
     ]
     if summary.tasks_due_week:
         lines.append("")
-        lines.append("Due this week:")
+        lines.append("Cluny scratch (not Kosistenz / not the phone):")
         lines.extend(f"  • {t}" for t in summary.tasks_due_week)
     else:
         lines.append("")
-        lines.append("No tasks due this week.")
+        lines.append("No Cluny scratch tasks due this week.")
     if summary.next_event:
         lines.append("")
-        lines.append(f"Next event: {summary.next_event}")
+        lines.append(f"Cluny calendar scratch: {summary.next_event}")
     return "\n".join(lines)

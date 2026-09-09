@@ -45,7 +45,42 @@ def _content_hash(text: str) -> str:
 
 
 def _meta_str(d: dict[str, str]) -> dict[str, str]:
-    return {k: str(v) for k, v in d.items()}
+    return {k: str(v) for k, v in d.items() if v is not None and str(v) != ""}
+
+
+def parse_kosistenz_ingest_headers(text: str) -> tuple[dict[str, str], str]:
+    """Parse leading ``key=value`` lines from Kosistenz journal ingest text.
+
+    Recognizes kind=journal|morning_brief|evening_review and optional slot=,
+    focus=, done=, rolled=. Does not create tasks from rolled ids.
+    Returns (metadata, remaining_body).
+    """
+    lines = text.splitlines()
+    meta: dict[str, str] = {}
+    i = 0
+    allowed = {"kind", "slot", "focus", "done", "rolled"}
+    while i < len(lines):
+        raw = lines[i].strip()
+        if not raw:
+            i += 1
+            # Stop after blank once we have at least one header
+            if meta:
+                break
+            continue
+        if "=" not in raw:
+            break
+        key, _, val = raw.partition("=")
+        key = key.strip().lower()
+        val = val.strip()
+        if key not in allowed:
+            break
+        if not val:
+            i += 1
+            continue
+        meta[key] = val
+        i += 1
+    body = "\n".join(lines[i:]).lstrip("\n")
+    return meta, body if body.strip() else text
 
 
 def _delete_vectors(collection: Collection, doc_id: str) -> None:
@@ -221,12 +256,19 @@ def add_inline_text(
     if not text.strip():
         raise ExtractionError("Text is empty.")
 
-    chash = _content_hash(text)
-    is_journal = "journal" in source_label.lower()
-    kind = "journal" if is_journal else "inline"
+    headers, body = parse_kosistenz_ingest_headers(text)
+    # Keep headers in stored text for human readability; metadata carries kind/slot.
+    store_text = text
+    chash = _content_hash(store_text)
+    is_journal = "journal" in source_label.lower() or headers.get("kind") in {
+        "journal",
+        "morning_brief",
+        "evening_review",
+    }
+    kind = headers.get("kind") or ("journal" if is_journal else "inline")
     display_title = (title.strip() if title else None) or source_label
     catalog_path = f"inline:{source_label}:{chash[:12]}"
-    size_bytes = len(text.encode("utf-8"))
+    size_bytes = len(store_text.encode("utf-8"))
     eff_size, eff_overlap = _effective_chunk_params(kind, settings, chunk_size, overlap)
 
     conn = connect(settings)
@@ -241,11 +283,18 @@ def add_inline_text(
         _delete_vectors(collection, doc_id)
         delete_chunks_for_doc(conn, doc_id)
 
-    extra = _meta_str({"doc_id": doc_id, "kind": kind})
+    extra = _meta_str(
+        {
+            "doc_id": doc_id,
+            "kind": kind,
+            **{k: v for k, v in headers.items() if k != "kind"},
+        }
+    )
+    # Never turn leftover evening / rolled ids into Cluny tasks — metadata only.
     n, parts = ingest_string(
         collection,
         ollama,
-        text,
+        store_text,
         source_label=display_title,
         max_chars=eff_size,
         overlap=eff_overlap,
