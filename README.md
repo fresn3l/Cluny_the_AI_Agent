@@ -256,7 +256,7 @@ cluny serve
 # http://127.0.0.1:8787/health  ·  /docs for OpenAPI
 ```
 
-See **`INTEGRATION.md`** for the Kosistenz contract (aligned with Kosistenz `docs/cluny-integration.md`). Optional login service: `macos/com.cluny.serve.plist`.
+See **`INTEGRATION.md`** for the Kosistenz contract (Kosistenz `docs/cluny-integration.md` in [ToDo-Desktop_Application](https://github.com/fresn3l/ToDo-Desktop_Application) wins if they disagree). Optional login service: `macos/com.cluny.serve.plist`.
 
 ## Docs
 

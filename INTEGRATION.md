@@ -2,9 +2,25 @@
 
 **Kosistenz is the life you live in. Cluny is the brain you ask.**
 
-This document describes how **[Kosistenz](https://github.com/fresn3l/Kosistenz)** should call **Cluny** (`cluny serve`). If anything here disagrees with Kosistenz’s handoff doc, **the Kosistenz doc wins**:
+This document describes how **Cluny** (`fresn3l/Cluny_the_AI_Agent`) works with **Kosistenz**. Kosistenz is the product; the GitHub repo is:
 
-**[`docs/cluny-integration.md`](https://github.com/fresn3l/Kosistenz/blob/main/docs/cluny-integration.md)** (see [Kosistenz PR #22](https://github.com/fresn3l/Kosistenz/pull/22)).
+**[fresn3l/ToDo-Desktop_Application](https://github.com/fresn3l/ToDo-Desktop_Application)**  
+(there is no `fresn3l/Kosistenz` repo.)
+
+If anything here disagrees with Kosistenz’s handoff doc, **that file wins**:
+
+**[`docs/cluny-integration.md`](https://github.com/fresn3l/ToDo-Desktop_Application/blob/cursor/cluny-run-ingest-7484/docs/cluny-integration.md)**  
+([PR #59](https://github.com/fresn3l/ToDo-Desktop_Application/pull/59) — may already be on `main`).
+
+---
+
+## One sentence
+
+Kosistenz owns the week clock, to-do list, goals, workouts, journal files, and iPhone pack. Cluny owns indexing, retrieval, Ollama, and **proposals**. Cluny does not schedule and does not keep a second copy of life as the live list.
+
+**Product decision (locked):** Cluny’s designated world is everything in Kosistenz (journals, work, clock, workouts, goals, briefs) — not a general second planner. Ask / Brain / Library / “Index my life” live in **Kosistenz**. Cluny’s PySide GUI and menu-bar widget are optional **admin** (library + capture notes), not a second Today.
+
+**Runtimes stay separate:** `cluny serve` + Ollama as a local service. Kosistenz starts and supervises `cluny serve`. Do not vendor Cluny into Kosistenz. Do not embed Ollama/Chroma in Kosistenz. Do not merge the two apps into one process. Do not migrate Kosistenz databases into Cluny.
 
 ---
 
@@ -12,27 +28,37 @@ This document describes how **[Kosistenz](https://github.com/fresn3l/Kosistenz)*
 
 | Kosistenz owns (source of truth) | Cluny owns (brain) |
 |----------------------------------|-------------------|
-| Week clock | PDFs, notes, library catalog |
-| Hard events (fixed on calendar) | Hybrid RAG (vector + FTS) |
-| Deadline to-dos | Ask / chat / agent / planner reasoning |
-| Which **day** you work something | Indexing a **copy** of journal text |
-| Packer times (when things land on the clock) | Search across your second brain |
-| Weekly goals | Work **proposals** (title, estimate, due, keyword) |
-| Workouts | Citations and meeting prep from **notes** |
-| Journal **files** (on disk) | CLI widget, full GUI, eval, backup |
-| iPhone pack export | |
+| Week clock + packer (first free gap) | PDFs, notes, library catalog |
+| Hard events (busy) | Hybrid RAG (vector + FTS) |
+| Deadline to-dos / All Work (`work_items`) | Ask / chat / agent reasoning |
+| Which **day** you work something | Indexing a **copy** of journal / check-in / life text |
+| Exact clock times of study/gym | Search across the second brain |
+| Weekly / long goals (Sunday spawn) | Work **proposals** (title, estimate, due **date**, keywords, citations) |
+| Workouts logged + week template | Citations and meeting-prep **notes** |
+| Journal **files** (`~/Library/Application Support/ToDo/Journal`) | Eval, backup of `CLUNY_DATA_DIR`, `cluny serve` |
+| iPhone pack (iCloud `/Kosistenz`) | Optional GUI / widget: Ask + Capture only |
+| Apple Calendar **read-only** ingest | |
 
-**Kosistenz must be fully usable with Cluny quit.** Scheduling, todos, calendar, goals, and journal editing live in Kosistenz.
+**Kosistenz must be fully usable with Cluny quit.** Scheduling, todos, calendar, goals, journal editing, and the phone pack live in Kosistenz.
 
-**Cluny must not:**
+**Cluny must work with Kosistenz quit** (library + ask over PDFs). When Kosistenz is open, week answers come from the **life snapshot** / `context_json`, not from Cluny’s `tasks.sqlite` or `calendar.sqlite`.
 
-- Maintain a second to-do list that Kosistenz treats as authoritative
-- Own the live calendar event list for the app UI
-- Choose **2:15 vs 2:40** (or any concrete clock slot)
-- Run **Fill week** or otherwise place work on the week clock
-- Override Kosistenz’s week clock, weekly goals, or iPhone pack
+---
 
-Cluny **may** suggest work items. Kosistenz decides whether to create them, which day they belong on, and when they get packed.
+## Hard locks (bugs if you violate them)
+
+1. **One calendar.** Kosistenz `calendar.sqlite`. Do not present Cluny’s week. Do not ICS/CalDAV/Google two-way as the planner. Do not `POST /calendar/import` the class feed.
+2. **One to-do list.** Kosistenz `work_items`. Cluny `tasks.sqlite` is not what Today, All Work, or the iPhone show. Do not treat `GET`/`POST` `/tasks` as live CRUD for Kosistenz.
+3. **The LLM never picks clock times.** No “put Spanish at 14:20.” No Fill week. No writing blocks `start`/`end`. Never emit `HH:MM` as a start time. You may suggest that something belongs **this week**; you may not assign Monday 9:30.
+4. **Class subscription events are deadlines, not meetings.** 11:59 dues are not busy.
+5. **No Apple Calendar write-back.**
+6. **Journal files stay in Kosistenz.** You index a copy. Deleting a catalog row must not delete the Kosistenz/iPhone file.
+7. **iPhone pack is Kosistenz-only.** Never write iCloud `/Kosistenz`.
+8. **Local-first.** Ollama on-device. No cloud LLM for planning.
+9. **Kosistenz must work if Cluny is quit.** Cluny must work if Kosistenz is quit (library + ask over PDFs).
+10. **Proposals are opt-in.** Kosistenz shows an inbox. Accept creates a Kosistenz work item (title, optional estimate, optional due **date**, optional goal). Placement is a later Kosistenz action (weekday chip + packer).
+11. **Ids do not fork.** After accept, the Kosistenz work-item id is canonical. Store `kosistenz:{uuid}` as a pointer. Do not mint a second live id.
+12. **Vocabulary:** Cluny **proposes**. Kosistenz **commits**. Kosistenz **publishes** a snapshot. Cluny **indexes** the journal. Never say Cluny “schedules,” “places,” or “fills the week.”
 
 ---
 
@@ -43,42 +69,64 @@ flowchart LR
     subgraph kos [Kosistenz — life]
         Clock[Week clock + packer]
         Events[Hard events]
-        Todos[Deadline to-dos]
+        Todos[work_items]
         Journal[Journal files]
         Goals[Goals / workouts / pack]
+        Snap[Life snapshot]
     end
 
     subgraph cluny [Cluny — brain]
         RAG[Library + RAG]
         Ask[Ask / chat / agent]
-        Index[Journal copy index]
+        Index[Index copies]
+        Prop[Proposals]
     end
 
     Journal -->|copy on save| Index
+    Snap -->|context_json / GET life| Ask
     kos -->|question + context| Ask
     Ask -->|answer + citations| kos
-    Ask -->|work proposals| kos
+    Prop -->|proposal inbox| kos
     kos -->|user accepts| Todos
     kos -->|user packs| Clock
 ```
 
-Kosistenz **pushes** journal text and **pulls** answers, snippets, and proposals. It does **not** treat Cluny’s `tasks.sqlite` or `calendar.sqlite` as the live schedule.
+---
+
+## What Kosistenz already ships (do not rebuild)
+
+Kosistenz (Python + Eel + Swift WKWebView) already:
+
+- Supervises `cluny serve` on `http://127.0.0.1:8787` (`CLUNY_DATA_DIR` = `~/Library/Application Support/Cluny`).
+- Installs Cluny via `macos/install_brain.sh`: clone this repo to `~/Library/Application Support/Cluny/src`, venv, `pip install -e ".[api]"`, wrapper at `~/Library/Application Support/Cluny/bin/cluny`, pull `llama3.2` + `nomic-embed-text`.
+- Pushes after local save (best-effort, never blocks a Kosistenz save):
+  - Journals → `POST /ingest/text` (`source=kosistenz-journal`, `collection=journal`, title like `2026-09-09 morning_brief`)
+  - Check-ins → `source=kosistenz-checkin`, `collection=check-in`
+  - Life digest → title `kosistenz-life`, `source=kosistenz-life`, `collection=life`
+- Publishes a read-only life snapshot:
+  - File: `~/Library/Application Support/ToDo/cluny_life_snapshot.json`
+  - HTTP (only while Kosistenz is open): `GET http://127.0.0.1:18741/api/cluny/life`
+- Sends that snapshot as `context_json` on `POST /chat`, `POST /chat/stream`, `POST /propose`.
+- Hosts Ask Cluny, Brain, Library, proposal inbox. Accept → All Work with due date only (`YYYY-MM-DD`). Incoming `14:30` is stripped. `scheduled_date` is never set. Does **not** call Cluny `/tasks/sync`.
+- Optional `X-Cluny-Token` / `Authorization: Bearer` if the user set an API key.
+
+Kosistenz will not add Ollama, Chroma, or embeddings. “Ask Cluny” is always HTTP to this service.
 
 ---
 
-## Quick start
+## Quick start (brain service)
 
-1. Install Cluny: `pip install -e ".[api]"` in [Cluny_the_AI_Agent](https://github.com/fresn3l/Cluny_the_AI_Agent).
-2. Start Ollama (for embeddings and LLM routes).
-3. Start the brain service:
+1. Prefer Kosistenz’s Mac install: `./macos/install_brain.sh` from the Kosistenz checkout.
+2. Or manually: `pip install -e ".[api]"` in this repo; start Ollama; then:
    ```bash
    cluny serve
    ```
-4. Default base URL: **`http://127.0.0.1:8787`**
-5. On Kosistenz launch (optional): probe health and disable brain buttons if down:
-   ```bash
-   curl -s http://127.0.0.1:8787/health
-   ```
+3. Default base URL: **`http://127.0.0.1:8787`**
+4. Bind localhost. Honor `CLUNY_DATA_DIR`. Python 3.11+; extras `[api]` required for serve (FastAPI, uvicorn).
+
+```bash
+curl -s http://127.0.0.1:8787/health
+```
 
 If Cluny is down, Kosistenz still runs: week clock, todos, calendar, journal files, pack.
 
@@ -96,96 +144,82 @@ If `CLUNY_API_TOKEN` is set, send `X-Cluny-Token: …` or `Authorization: Bearer
 
 ---
 
-## Endpoints Kosistenz should use
+## HTTP Kosistenz already calls (keep these working)
 
-| Kosistenz need | Cluny endpoint | Notes |
-|----------------|----------------|-------|
-| Is brain up? | `GET /health` | `brain_ready` + `message`; disable Ask if false |
-| Index journal on save | `POST /ingest/text` | **Copy** of entry; Kosistenz keeps canonical file |
-| Search notes | `POST /search` | Retrieval only, no LLM |
-| Ask (full response) | `POST /chat` | `context`, `context_json`, optional `session_id`; returns `sources` |
-| Ask (streaming) | `POST /chat/stream` or `POST /ask` | SSE tokens + citations for typing indicator |
-| Work proposals | `POST /propose` | Structured `{ title, estimate_minutes, due, keywords }[]` |
-| Deep tool loop | `POST /agent` | Modes: `knowledge`, `planner`, etc. |
-| Browse indexed docs | `GET /library` | Optional `?collection=` / `?source=` filters; settings / debug UI |
+Default base: `http://127.0.0.1:8787`
 
-### Journal copy (on save)
+| Method | Path | Kosistenz uses it for |
+|--------|------|------------------------|
+| `GET` | `/health` | `brain_ready`, `ollama_ok`, `status` |
+| `GET` | `/stats` | Brain tab |
+| `POST` | `/ingest/text` | `{ text, catalog: true, source, title, collection }` |
+| `POST` | `/chat` | `{ question, context_json?, session_id?, collection?, k? }` → `{ answer, sources, session_id, route, tool_calls }` |
+| `POST` | `/chat/stream` | SSE `data: {token\|route\|session_id\|sources}` then `[DONE]` |
+| `POST` | `/propose` | same body as chat → `{ proposals: [{ id?, title, estimate_minutes?, due?, keywords? }], sources? }` |
+| `GET`/`POST`/`DELETE`/`PATCH` | `/library…` | Library tab |
+| `GET`/`PUT` | brain / user config | Brain settings |
 
-Kosistenz writes the journal file locally, then sends a copy for search:
+Also used by broader clients (keep working): `POST /search`, `POST /agent`, `POST /ask` (stream alias).
+
+**`due` on proposals must be a calendar day (`YYYY-MM-DD`), never a start time.** Kosistenz strips times anyway; do not emit them.
+
+---
+
+## Life snapshot / `context_json`
+
+`context_json` is the **live week**. Prefer it over Cluny `tasks.sqlite` / `calendar.sqlite` for “what’s due,” “what’s today,” “free time,” and coaching.
+
+When Kosistenz is running, Cluny may also fetch:
+
+- `GET http://127.0.0.1:18741/api/cluny/life`
+- and/or read `~/Library/Application Support/ToDo/cluny_life_snapshot.json`
+
+If Kosistenz is quit, answer from the library/index only; **do not invent a week** from Cluny tasks/calendar SQLite.
+
+Snapshot includes (among other fields): `instruction`, `date`, `week_start`/`week_end`, `journal`, `work`, `calendar.days`, `workouts`, `workout_plan`, `goals`, `briefs`, `todos_today`, `overdue`, `deadline_todos`, `events_today`, `free_minutes`, `analytics`. The instruction already says: never pick `HH:MM`; do not treat Cluny tasks/calendar as live.
+
+For schema details, read Kosistenz `cluny_snapshot.py`, `cluny_client.py`, and `cluny_sync.py` on the integration branch — do not invent a second week.
+
+### Journal ingest metadata
+
+Journal ingest text may start with metadata lines: `kind=journal|morning_brief|evening_review`, optional `slot=`, `focus=` / `done=` / `rolled=` ids. Keep those in chunk metadata. **Do not** turn leftover evening items into Cluny tasks.
 
 ```http
 POST /ingest/text
 Content-Type: application/json
 
 {
-  "text": "Today I worked on…",
+  "text": "kind=morning_brief\n…",
   "catalog": true,
   "source": "kosistenz-journal",
-  "title": "2026-09-01 journal",
+  "title": "2026-09-09 morning_brief",
   "collection": "journal"
 }
 ```
 
-Optional `collection` tags the document in Cluny's library (`journal`, `analytics`, etc.) for scoped RAG.
+Requires Ollama for embedding. The on-disk journal in Kosistenz remains canonical.
 
-Requires Ollama for embedding. The on-disk journal in Kosistenz remains canonical; Cluny only indexes for RAG.
+---
 
-### Analytics snapshot (live context)
-
-Send rolling or weekly analytics in `context_json` on `/chat` and `/propose`:
-
-```json
-{
-  "date": "2026-09-01",
-  "analytics": {
-    "period": "2026-W35",
-    "tasks_completed": 12,
-    "tasks_slipped": 3,
-    "focus_hours": 18.5,
-    "journal_streak_days": 14,
-    "goal_progress": [{ "goal": "Ship pack", "percent": 60 }]
-  },
-  "weekly_goals": ["Ship Kosistenz pack"]
-}
-```
-
-For long-term trends, also ingest weekly rollup text:
-
-```http
-POST /ingest/text
-{
-  "text": "Weekly analytics 2026-W35\nTasks completed: 12\nTasks slipped: 3",
-  "catalog": true,
-  "source": "kosistenz-analytics",
-  "title": "analytics-2026-W35",
-  "collection": "analytics"
-}
-```
-
-### Ask with Kosistenz context
-
-Send Kosistenz state as free text (`context`), structured JSON (`context_json`), or both. Cluny merges them for reasoning; it does not read Kosistenz’s DB.
+## Ask with Kosistenz context
 
 ```http
 POST /chat
 {
   "question": "What should I prioritize before Friday?",
-  "context_json": {
-    "date": "2026-09-01",
-    "deadline_todos": [{ "title": "Send agenda", "due": "2026-09-04" }],
-    "events_today": [{ "title": "Product sync", "start": "14:00" }],
-    "weekly_goals": ["Ship Kosistenz pack"]
-  },
+  "context_json": { },
   "session_id": null
 }
 ```
 
-Response includes citations and a session id for follow-ups:
+Pass the life snapshot (or a trimmed view) as `context_json`. Cluny merges it for reasoning; it does not read Kosistenz’s SQLite directly.
+
+Response:
 
 ```json
 {
   "route": "ask",
-  "answer": "Focus on the agenda before Thursday…",
+  "answer": "…",
   "tool_calls": [],
   "sources": [
     { "label": "2026-08-28 journal", "snippet": "…", "doc_path": "…", "chunk_index": 2 }
@@ -194,285 +228,128 @@ Response includes citations and a session id for follow-ups:
 }
 ```
 
-Pass `session_id` on later messages in the same widget thread; Cluny stores history in `sessions.sqlite` (Kosistenz does not need to replay the full RAG state).
-
-For a typing indicator, stream tokens:
+Streaming:
 
 ```http
 POST /chat/stream
 Accept: text/event-stream
 ```
 
-Same body as `/chat`. SSE events (each line `data: …`):
+SSE events: meta (`route`, `session_id`), `sources`, `token`, then `[DONE]`.
 
-| Event | Payload |
-|-------|---------|
-| Meta | `{"route":"ask","session_id":"…"}` |
-| Citations | `{"sources":[…]}` |
-| Token | `{"token":" word"}` |
-| Done | `[DONE]` |
+For meeting prep, use snapshot busy/to-dos/dues + RAG snippets. Structured day agenda does **not** require inventing calendar rows.
 
-`/ask` is an alias for `/chat/stream` (RAG-focused naming).
+---
 
-For meeting prep, include the meeting title and any deadlines; Cluny returns note snippets and suggestions—not a new calendar row.
+## Work proposals
 
-```http
-POST /agent
-{
-  "question": "Prep for Product sync Tuesday. Related open work: write agenda, review metrics.",
-  "mode": "knowledge"
-}
-```
-
-### Work proposals
-
-`/propose` retrieves relevant journal/analytics chunks (RAG) and merges them with live `context_json` before suggesting work items.
+`/propose` should retrieve relevant library chunks and merge live `context_json`, then emit proposals only — **not** live tasks.
 
 ```http
 POST /propose
 {
-  "question": "What should I tackle before the product sync?",
-  "context": "Open: write agenda (Thu). Meeting: Product sync Tue 2pm.",
-  "context_json": {
-    "analytics": { "tasks_slipped": 2, "period": "2026-W35" }
-  },
+  "question": "What should I tackle from this syllabus?",
+  "context_json": { },
   "collection": "journal"
 }
 ```
+
+Emit:
 
 ```json
 {
   "proposals": [
     {
+      "id": "stable-id-from-syllabus-row-or-hash",
       "title": "Draft agenda for Product sync",
-      "estimate_minutes": 25,
-      "due": "2026-09-04",
-      "keywords": ["product", "agenda"]
+      "estimate_minutes": 45,
+      "due": "2026-09-12",
+      "keywords": ["spanish"],
+      "citations": [{ "title": "syllabus.pdf", "locator": "…" }]
     }
   ],
-  "sources": [
-    {
-      "label": "2026-08-28 journal",
-      "snippet": "…",
-      "doc_path": "inline:kosistenz-journal:abc123",
-      "chunk_index": 2
-    }
-  ]
+  "sources": []
 }
 ```
 
-Kosistenz creates the real to-do, assigns the **day**, and runs the packer.
+Rules:
 
-### Journal watch (optional)
+- **Stable `id`** so the same PDF row does not spam every launch (Kosistenz also hashes title+due+keywords).
+- **`due` is `YYYY-MM-DD` only** — never `HH:MM`.
+- After Kosistenz accepts, it may later tell you `kosistenz:{work_item_id}`. Remember that pointer; stop re-proposing the same row.
+- Optional `goal_id` later; for now keywords are enough.
+- Do **not** send start/end times, recurrence, workout logs, or goal create/delete.
+- Kosistenz ignores unknown keys and strips bad dues — add fields backward-compatibly.
 
-Instead of push on every save, set `CLUNY_KOSISTENZ_JOURNAL_DIR` and run:
-
-```bash
-cluny watch-kosistenz-journal
-```
-
-Cluny indexes journal files from disk into its library (Kosistenz files remain canonical).
-
-### Service at login
-
-```bash
-cluny serve-install
-# remove: cluny serve-uninstall
-```
+Kosistenz creates the real to-do, assigns the **day**, and runs the packer. Cluny never places.
 
 ---
 
-## HTTP API surface
+## Agent / planner tools (this repo)
 
-Kosistenz and other clients use **`cluny serve`** brain routes only:
+Canonical loop for work ideas: **`search_brain` then `create_proposal`** — not `create_task` as the live to-do for Kosistenz.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/health` | Probe brain availability (`brain_ready`, `ollama_ok`) |
-| `POST` | `/ingest/text` | Index journal copy on save |
-| `POST` | `/search` | Retrieval only |
-| `POST` | `/chat` | Supervisor-routed Ask (JSON, `sources`, `session_id`) |
-| `POST` | `/chat/stream` | Streaming Ask (SSE) |
-| `POST` | `/ask` | Alias for `/chat/stream` |
-| `POST` | `/propose` | Work proposals from question + context |
-| `POST` | `/agent` | Tool loop |
-| `GET` | `/library` | Indexed documents (optional) |
-| `GET` | `/brain/config` | Effective brain instructions (prompts + behavior) |
-| `PUT` | `/brain/config` | Save `brain_config.json` overrides |
-| `POST` | `/brain/config/reset` | Reset prompts/behavior/persona |
+Disable or retarget tools that write life records (create/complete Kosistenz-like tasks, write calendar events, Fill week).
 
-Task/calendar/context HTTP routes from Sprint 11 experiments were **removed** — Kosistenz owns those domains. Standalone Cluny still has `cluny tasks` and `cluny calendar` via CLI/widget.
+- Day agenda / meeting prep: busy/to-dos/dues from snapshot; snippets from RAG.
+- Never spawn weekly goals (“3h spanish”). That is Kosistenz Sunday spawn.
+- Never mark a Kosistenz to-do done as a side effect of chat.
+- Prefer snapshot/`context_json` over Cluny `tasks.sqlite` / `calendar.sqlite`.
+
+Standalone CLI `cluny tasks` / `cluny calendar` may remain for **scratch** use when Cluny runs alone. They are **not** the Kosistenz list or week.
 
 ---
 
-## Health
+## Widget vs Kosistenz
 
-```http
-GET /health
-```
+| Surface | Role |
+|---------|------|
+| Kosistenz Ask / Brain / Library / proposal inbox | Life + brain UX |
+| Cluny menu-bar widget | Ask + **Capture notes** into the library |
+| Cluny PySide GUI | Optional admin: library browse, capture |
+| Cluny Task tab in the widget | Label as **Cluny scratch** (will not appear in Kosistenz or on the phone), or disable for life tasks |
 
-```json
-{
-  "status": "ok",
-  "brain_ready": true,
-  "message": null,
-  "ollama_ok": true,
-  "doc_count": 42,
-  "task_count": 7,
-  "chunk_count": 1200
-}
-```
-
-- `brain_ready` is false when Ollama is down; `message` explains why.
-- `task_count` counts **Cluny’s local** `tasks.sqlite` (CLI/widget), not Kosistenz todos.
-- If `ollama_ok` is false: Kosistenz still works; hide or disable ingest and LLM actions.
-- OpenAPI: `http://127.0.0.1:8787/docs`
+Cluny widget is **not** a second Today.
 
 ---
 
-## Kosistenz widget (Ask panel)
+## Local Cluny stores (scratch / brain only)
 
-Ship **`clients/kosistenz/ClunyBrainClient.swift`** into the Kosistenz app. It wraps the endpoints above for the in-app “Talk to Cluny” widget.
+| Path under `CLUNY_DATA_DIR` | Role |
+|-----------------------------|------|
+| Library catalog + FTS + Chroma | Canonical for PDFs/notes |
+| `sessions.sqlite` | Chat history for Ask |
+| `tasks.sqlite` | **Scratch** for standalone CLI/widget — not Kosistenz All Work |
+| `calendar.sqlite` | **Scratch** / imported ICS for Cluny alone — not the week you carry |
+| `brain_config.json` / `user_config.json` | Brain prompts and model prefs |
 
-### Launch probe
+Do not document these as sources of truth for Kosistenz UI or the iPhone.
 
-On Kosistenz launch, call `GET /health`. If `brain_ready` is false, show the offline state and disable Ask / ingest buttons (week clock and journal still work).
-
-### Non-streaming chat
-
-```swift
-let client = ClunyBrainClient(baseURL: URL(string: "http://127.0.0.1:8787")!)
-let health = try await client.health()
-guard health.brainReady else { /* show offline */ return }
-
-var sessionId: String? = nil
-let ctx = KosistenzContextPayload(
-    date: "2026-09-01",
-    deadlineTodos: [.init(title: "Send agenda", due: "2026-09-04")],
-    eventsToday: [.init(title: "Product sync", start: "14:00")],
-    weeklyGoals: ["Ship pack"]
-)
-let reply = try await client.chat(
-    question: "What should I focus on today?",
-    contextJSON: ctx,
-    sessionId: sessionId
-)
-sessionId = reply.sessionId
-// reply.sources → citation chips in the widget
-```
-
-### Streaming chat (typing indicator)
-
-```swift
-for try await event in client.chatStream(question: "Summarize my week", sessionId: sessionId) {
-    switch event {
-    case .meta(let route, let sid):
-        sessionId = sid
-    case .sources(let cites):
-        showCitations(cites)
-    case .token(let t):
-        appendToAnswer(t)
-    case .done:
-        break
-    }
-}
-```
-
-### Work proposals
-
-```swift
-let response = try await client.propose(
-    question: "Prep for product sync",
-    contextJSON: ctx
-)
-// response.proposals → create todos; response.sources → citation chips
-```
-
-### Context fields
-
-| Field | Type | Purpose |
-|-------|------|---------|
-| `context` | string | Freeform Kosistenz snapshot |
-| `context_json` | object | Structured: `date`, `deadline_todos`, `events_today`, `weekly_goals`, `analytics`, `notes` |
-| `session_id` | string? | Omit on first message; pass back for multi-turn |
-| `collection` | string? | Limit RAG to a named library collection (e.g. `journal`, `analytics`) |
-
-Cluny merges `context` + `context_json` into the prompt. Prefer `context_json` for the widget — cleaner than string concatenation in Swift.
-
-### Task mirror (optional)
-
-Kosistenz owns authoritative todos and scheduling. Cluny can **mirror** todos by `external_id` so the tasks agent and local tools see the same open work — without Cluny picking days or clock slots.
-
-```http
-POST /tasks/sync
-{
-  "external_id": "kosistenz-todo-uuid",
-  "title": "Send agenda",
-  "status": "open",
-  "due_at": "2026-09-04",
-  "notes": "optional"
-}
-```
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/tasks/sync` | Upsert mirror by `external_id` |
-| `GET` | `/tasks/sync` | List all mirrored tasks |
-| `GET` | `/tasks/sync/{external_id}` | Get one mirror |
-| `DELETE` | `/tasks/sync/{external_id}` | Remove mirror when Kosistenz deletes the todo |
-
-Push updates when Kosistenz todos change; delete the mirror when the real todo is removed. Cluny never schedules — it only reflects state for Ask/agent context.
-
-### Errors
-
-| Code | Meaning |
-|------|---------|
-| 404 | Unknown `session_id` — start a new session |
-| 502 | Ollama unreachable |
+Optional task-mirror HTTP (`/tasks/sync`) may exist for experiments; **Kosistenz does not use it as the live list.** Prefer proposals + snapshot.
 
 ---
 
-## Swift client (reference)
+## What Cluny must never do
 
-Full implementation: **`clients/kosistenz/ClunyBrainClient.swift`**. Minimal sketch:
+- Delete or replace Kosistenz SQLite.
+- Require Kosistenz to become a thin UI of `cluny serve`.
+- Write Apple Calendar, iCloud pack, packed blocks, or `HH:MM` placements.
+- Use a cloud LLM for this integration.
+- Merge runtimes / ship PySide inside Kosistenz.
+- Build an iPhone Ask Cluny (Mac asleep = Cluny off on purpose).
+- Open PRs against `ToDo-Desktop_Application` from the Cluny agent unless asked.
+- “Fix” Kosistenz by making Cluny the store.
 
-```swift
-struct ClunyBrainClient {
-    let base = URL(string: "http://127.0.0.1:8787")!
-    var token: String?
+---
 
-    func health() async throws -> HealthResponse {
-        var req = URLRequest(url: base.appendingPathComponent("health"))
-        return try await decode(req)
-    }
+## How to work across the two repos
 
-    /// After Kosistenz saves journal file to disk.
-    func indexJournalCopy(text: String, title: String) async throws {
-        var req = URLRequest(url: base.appendingPathComponent("ingest/text"))
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let token { req.setValue(token, forHTTPHeaderField: "X-Cluny-Token") }
-        req.httpBody = try JSONEncoder().encode([
-            "text": text,
-            "catalog": true,
-            "source": "kosistenz-journal",
-            "title": title
-        ])
-        _ = try await URLSession.shared.data(for: req)
-    }
+| Repo | Work |
+|------|------|
+| **This repo** (`Cluny_the_AI_Agent`) | Brain API, RAG, proposals, docs, widget-as-brain |
+| **Kosistenz** (`ToDo-Desktop_Application`) | Planner, snapshot, inbox UI, ingest push, supervisor, Mac install script |
 
-    func ask(_ question: String) async throws -> ChatResponse {
-        var req = URLRequest(url: base.appendingPathComponent("chat"))
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let token { req.setValue(token, forHTTPHeaderField: "X-Cluny-Token") }
-        req.httpBody = try JSONEncoder().encode(["question": question])
-        return try await decode(req)
-    }
-}
-```
-
-Kosistenz does **not** call `/tasks` from this client.
+If a change needs both (e.g. new `/propose` field), add it here **backward-compatibly**; mention the field so the Kosistenz agent can implement it (e.g. `citations`, `goal_id`).
 
 ---
 
@@ -482,33 +359,48 @@ Kosistenz does **not** call `/tasks` from this client.
 |------|---------|
 | 401 | Bad/missing token |
 | 403 | Non-localhost without token |
-| 404 | Resource not found |
+| 404 | Resource not found / unknown `session_id` |
 | 502 | Ollama unreachable or model error |
 
----
-
-## Service at login (optional)
-
-See **Journal watch** and **`cluny serve-install`** above. Kosistenz does not depend on this.
+OpenAPI: `http://127.0.0.1:8787/docs`
 
 ---
 
-## Data directories
+## Optional: journal watch / LaunchAgent
 
-| Data | Canonical location |
-|------|-------------------|
-| Journal files, week clock, todos, events, goals, pack | **Kosistenz** app data |
-| PDFs, notes, vectors, FTS, library catalog | **Cluny** `CLUNY_DATA_DIR` (default `.cluny` next to Cluny repo) |
-| Journal **search index** | Cluny (copy ingested from Kosistenz) |
+```bash
+# Opt-in: index files Kosistenz owns (do not move them)
+cluny watch-kosistenz-journal
 
-Do not point Kosistenz at Cluny’s `tasks.sqlite` or `calendar.sqlite` for UI.
+cluny serve-install
+# remove: cluny serve-uninstall
+```
+
+---
+
+## Tests (integration intent)
+
+1. Kosistenz quit → `cluny ask` still works on a PDF.
+2. Kosistenz open → “what’s due this week” uses snapshot / `context_json`; no new live row in Cluny `tasks.sqlite` as the to-do.
+3. Propose a syllabus item → JSON proposal only, day-only `due`, no clock time.
+
+---
+
+## Done when
+
+- This repo’s docs say Cluny is **brain + proposals**, not home-base stores.
+- Planner/agent cannot create the live to-do or write the week.
+- Chat answers about the week come from Kosistenz snapshot/`context_json`, not Cluny calendar/tasks.
+- `/propose` returns day-only dues and stable ids.
+- Widget is Ask + Capture, not a second Today.
+- Cluny still indexes PDFs and answers when Kosistenz is quit.
 
 ---
 
 ## Summary for implementers
 
-1. **Kosistenz** = week clock, hard events, deadline todos, packing, goals, workouts, journal files, iPhone pack.
+1. **Kosistenz** (`ToDo-Desktop_Application`) = week clock, hard events, deadline todos, packing, goals, workouts, journal files, iPhone pack.
 2. **Cluny** = RAG, Ask/chat/agent, journal **index copy**, work **proposals**.
-3. Call **`/health`**, **`/ingest/text`**, **`/search`**, **`/chat`**, **`/ask`**, **`/agent`**.
-4. Do **not** sync UI from Cluny `/tasks` or `/calendar`.
-5. When in doubt, read **`docs/cluny-integration.md`** in the Kosistenz repo.
+3. Keep **`/health`**, **`/stats`**, **`/ingest/text`**, **`/chat`**, **`/chat/stream`**, **`/propose`**, **`/library…`**, brain config working.
+4. Prefer **snapshot / `context_json`**. Do **not** sync UI from Cluny `/tasks` or `/calendar`.
+5. When in doubt, read **`docs/cluny-integration.md`** in the Kosistenz repo — that file wins.
